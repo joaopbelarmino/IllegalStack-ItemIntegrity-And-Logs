@@ -1,0 +1,11 @@
+package main.java.me.dniym.identity.conflict;
+
+public enum ConflictAction {
+    WOULD_REMOVE,
+    REMOVED,
+    DELETE_ABORTED_REVALIDATION_FAILED,
+    DELETE_ABORTED_PERSISTENCE_FAILED,
+    DELETE_ABORTED_VIRTUAL_HOLDER,
+    MONITOR_ABORTED_PERSISTENCE_FAILED,
+    MONITOR_ONLY
+}
