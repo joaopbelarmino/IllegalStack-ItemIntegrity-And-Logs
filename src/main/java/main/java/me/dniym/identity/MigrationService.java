@@ -28,10 +28,14 @@ public final class MigrationService {
      *         rastreável (ver TrackabilityPolicy).
      */
     public MigrationResult ensureIdentity(ItemStack stack, Location fallbackLocation) {
-        if (!TrackabilityPolicy.isTrackable(stack)) {
+        if (!TrackabilityPolicy.isCandidate(stack)) {
             return null;
         }
-        ItemIdentity existing = identityService.readIdentity(stack);
+        var pdc = stack.getPersistentDataContainer();
+        if (TrackabilityPolicy.isExempt(pdc)) {
+            return null;
+        }
+        ItemIdentity existing = identityService.readIdentity(pdc);
         if (existing != null) {
             return new MigrationResult(existing, false);
         }

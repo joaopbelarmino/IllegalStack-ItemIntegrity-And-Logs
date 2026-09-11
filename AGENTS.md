@@ -1,6 +1,6 @@
 # Project workflow
 
-- Canonical private remote: https://github.com/joaopbelarmino/NomeDoPlugin.git
+- Canonical private remote: https://github.com/joaopbelarmino/IllegalStack-ItemIntegraty-And-Logs-By-ZetraMC.git
 - The repository name follows the owner's latest explicit instruction.
 - This Git repository is the primary source of truth for IllegalStack ZetraMC
   Item Integrity. Work here, not in old ZIP extractions or copied releases.

@@ -7,6 +7,7 @@ import main.java.me.dniym.identity.IdentityService;
 import main.java.me.dniym.identity.ItemIdentity;
 import main.java.me.dniym.identity.MigrationResult;
 import main.java.me.dniym.identity.MigrationService;
+import main.java.me.dniym.identity.TrackabilityPolicy;
 import main.java.me.dniym.identity.VirtualCustodyService;
 import main.java.me.dniym.identity.audit.AuditQueue;
 import main.java.me.dniym.identity.audit.AuditTask;
@@ -53,6 +54,7 @@ import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerItemBreakEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.vehicle.VehicleDestroyEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.inventory.EntityEquipment;
@@ -62,6 +64,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BlockStateMeta;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -82,6 +85,7 @@ public final class ItemIntegrityLifecycleListener implements Listener {
     private final IdentityPlayerInventoryListener playerScanner;
     private final VirtualCustodyService virtualCustodyService;
     private final Map<String, Queue<PendingSpawn>> pendingLegitSpawns = new ConcurrentHashMap<>();
+    private final Map<InventoryReconciliationKey, InventorySnapshot> pendingInventories = new ConcurrentHashMap<>();
 
     public ItemIntegrityLifecycleListener(IllegalStack plugin, IdentityService identityService,
                                           MigrationService migrationService, PresenceStore presenceStore,
@@ -163,6 +167,11 @@ public final class ItemIntegrityLifecycleListener implements Listener {
         } else if (inventory.getLocation() != null) {
             scanInventory(inventory, null, "inventory_close");
         }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onQuit(PlayerQuitEvent event) {
+        pendingInventories.keySet().removeIf(key -> key.viewer().equals(event.getPlayer().getUniqueId()));
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -355,17 +364,17 @@ public final class ItemIntegrityLifecycleListener implements Listener {
     }
 
     private void scanInventory(Inventory inventory, Player viewer, String context) {
+        scanInventory(inventory, viewer, captureInventory(inventory, viewer, context));
+    }
+
+    private void scanInventory(Inventory inventory, Player viewer, InventorySnapshot snapshot) {
         Map<String, NestedShulkerCustody> carriedShulkerContents = inventory.getType() == InventoryType.SHULKER_BOX
                 ? indexCarriedShulkerContents(viewer) : Map.of();
-        ItemStack[] contents = inventory.getContents();
-        for (int slot = 0; slot < contents.length; slot++) {
-            ItemStack item = contents[slot];
-            if (item == null || item.getType().isAir()) {
-                continue;
-            }
-            HolderRef holder = holderForInventory(inventory, viewer, slot, context);
+        for (ObservedInventoryItem observed : snapshot.items()) {
+            ItemStack item = observed.item();
+            HolderRef holder = observed.holder();
             if (holder instanceof HolderRef.VirtualHolder) {
-                ItemIdentity identity = identityService.readIdentity(item);
+                ItemIdentity identity = observed.identity();
                 if (identity != null) {
                     ShulkerMirror mirror = shulkerMirror(identity, inventory, viewer, carriedShulkerContents);
                     if (mirror.kind() == ShulkerMirrorKind.PHYSICAL_BLOCK) {
@@ -383,7 +392,9 @@ public final class ItemIntegrityLifecycleListener implements Listener {
                     observeVirtual(identity, (HolderRef.VirtualHolder) holder);
                 }
             } else {
-                MigrationResult migration = migrationService.ensureIdentity(item, inventory.getLocation());
+                MigrationResult migration = observed.identity() != null && TrackabilityPolicy.isTrackable(item)
+                        ? new MigrationResult(observed.identity(), false)
+                        : migrationService.ensureIdentity(item, inventory.getLocation());
                 if (migration != null) {
                     registerIfFresh(migration, item, viewer);
                     presenceStore.commitHandoff(migration.identity(), holder, PresenceState.PERSISTED_CONTAINER);
@@ -393,35 +404,48 @@ public final class ItemIntegrityLifecycleListener implements Listener {
     }
 
     private void scheduleInventoryReconciliation(Inventory inventory, Player viewer, String context) {
-        Map<String, TrackedInventoryItem> before = trackedInventory(inventory, viewer, context);
-        Scheduler.runTaskLater(plugin, () -> {
-            reconcileInventoryRemovals(inventory, viewer, before);
-            if (inventory.getLocation() != null || isVirtualInventoryCandidate(inventory)) {
-                scanInventory(inventory, viewer, context);
-            }
-            playerScanner.scanPlayer(viewer, PresenceState.LIVE_CONFIRMED);
-        }, 1, viewer);
+        InventoryReconciliationKey key = new InventoryReconciliationKey(viewer.getUniqueId(), inventory);
+        if (pendingInventories.containsKey(key)) return;
+        InventorySnapshot before = captureInventory(inventory, viewer, context);
+        pendingInventories.put(key, before);
+        try {
+            Scheduler.runTaskLater(plugin, () -> {
+                if (!pendingInventories.remove(key, before) || !viewer.isOnline()) return;
+                InventorySnapshot after = captureInventory(inventory, viewer, context);
+                reconcileInventoryRemovals(viewer, before.tracked(), after.tracked());
+                if (inventory.getLocation() != null || isVirtualInventoryCandidate(inventory)) {
+                    scanInventory(inventory, viewer, after);
+                }
+                playerScanner.scanPlayer(viewer, PresenceState.LIVE_CONFIRMED);
+            }, 1, viewer);
+        } catch (RuntimeException error) {
+            pendingInventories.remove(key, before);
+            throw error;
+        }
     }
 
-    private Map<String, TrackedInventoryItem> trackedInventory(Inventory inventory, Player viewer, String context) {
+    private InventorySnapshot captureInventory(Inventory inventory, Player viewer, String context) {
         Map<String, TrackedInventoryItem> found = new HashMap<>();
+        List<ObservedInventoryItem> items = new ArrayList<>();
         ItemStack[] contents = inventory.getContents();
         for (int slot = 0; slot < contents.length; slot++) {
-            ItemIdentity identity = identityService.readIdentity(contents[slot]);
+            ItemStack item = contents[slot];
+            if (item == null || item.getType().isAir()) continue;
+            ItemIdentity identity = identityService.readIdentity(item);
+            HolderRef holder = holderForInventory(inventory, viewer, slot, context);
+            items.add(new ObservedInventoryItem(item, identity, holder));
             if (identity != null) {
-                found.putIfAbsent(identity.id(), new TrackedInventoryItem(identity,
-                        holderForInventory(inventory, viewer, slot, context)));
+                found.putIfAbsent(identity.id(), new TrackedInventoryItem(identity, holder));
             }
         }
-        return found;
+        return new InventorySnapshot(items, found);
     }
 
-    private void reconcileInventoryRemovals(Inventory inventory, Player viewer,
-                                            Map<String, TrackedInventoryItem> before) {
+    private void reconcileInventoryRemovals(Player viewer, Map<String, TrackedInventoryItem> before,
+                                            Map<String, TrackedInventoryItem> after) {
         if (before.isEmpty()) {
             return;
         }
-        Map<String, TrackedInventoryItem> after = trackedInventory(inventory, viewer, "inventory_after");
         for (Map.Entry<String, TrackedInventoryItem> entry : before.entrySet()) {
             if (after.containsKey(entry.getKey())) {
                 continue;
@@ -438,6 +462,10 @@ public final class ItemIntegrityLifecycleListener implements Listener {
             }
         }
     }
+
+    private record InventoryReconciliationKey(java.util.UUID viewer, Inventory inventory) {}
+    private record ObservedInventoryItem(ItemStack item, ItemIdentity identity, HolderRef holder) {}
+    private record InventorySnapshot(List<ObservedInventoryItem> items, Map<String, TrackedInventoryItem> tracked) {}
 
     private boolean canonicalMatchesInventorySource(ItemIdentity identity, HolderRef source, Player viewer) {
         return presenceStore.getCanonical(identity).map(PresenceRecord::holder).map(canonical -> {

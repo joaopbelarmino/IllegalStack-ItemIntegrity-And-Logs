@@ -1,10 +1,9 @@
 package main.java.me.dniym.identity;
 
+import io.papermc.paper.persistence.PersistentDataContainerView;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.EnumSet;
@@ -13,11 +12,11 @@ import java.util.Set;
 /**
  * Decide se um item é candidato a receber identidade própria.
  *
- * Ordem de checagem (nessa ordem, de propósito):
+ * Prioridade das regras (o filtro barato de material executa primeiro):
  *  1. zetra:integrity_exempt=true na PDC -> NUNCA rastreado, sem exceção.
  *     Pra itens técnicos/temporários de plugin (relógio de menu, seletor de
  *     servidor, gadget de lobby, item de GUI) que não representam gameplay
- *     persistente. Isso é checado ANTES de qualquer outra regra.
+ *     persistente. Mesmo FORCE_INCLUDE nunca sobrepoe esta isencao.
  *  2. FORCE_EXCLUDE / FORCE_INCLUDE - pontos de extensão pra whitelist/
  *     blacklist futura via config.
  *  3. Regra base: getMaxStackSize() == 1 (itens naturalmente não-empilháveis).
@@ -40,10 +39,11 @@ public final class TrackabilityPolicy {
     }
 
     public static boolean isTrackable(ItemStack stack) {
+        return isCandidate(stack) && !isExempt(stack);
+    }
+
+    static boolean isCandidate(ItemStack stack) {
         if (stack == null) {
-            return false;
-        }
-        if (isExempt(stack)) {
             return false;
         }
         Material type = stack.getType();
@@ -58,11 +58,10 @@ public final class TrackabilityPolicy {
 
     /** true se o item foi explicitamente marcado como isento (item técnico/temporário de plugin, não gameplay). */
     public static boolean isExempt(ItemStack stack) {
-        if (stack == null || !stack.hasItemMeta()) {
-            return false;
-        }
-        ItemMeta meta = stack.getItemMeta();
-        PersistentDataContainer pdc = meta.getPersistentDataContainer();
+        return stack != null && isExempt(stack.getPersistentDataContainer());
+    }
+
+    static boolean isExempt(PersistentDataContainerView pdc) {
         if (!pdc.has(KEY_EXEMPT, PersistentDataType.INTEGER)) {
             return false;
         }
@@ -80,12 +79,11 @@ public final class TrackabilityPolicy {
         if (stack == null) {
             return;
         }
-        ItemMeta meta = stack.getItemMeta();
-        PersistentDataContainer pdc = meta.getPersistentDataContainer();
-        pdc.set(KEY_EXEMPT, PersistentDataType.INTEGER, 1);
-        if (reason != null) {
-            pdc.set(KEY_EXEMPT_REASON, PersistentDataType.STRING, reason);
-        }
-        stack.setItemMeta(meta);
+        stack.editPersistentDataContainer(pdc -> {
+            pdc.set(KEY_EXEMPT, PersistentDataType.INTEGER, 1);
+            if (reason != null) {
+                pdc.set(KEY_EXEMPT_REASON, PersistentDataType.STRING, reason);
+            }
+        });
     }
 }
