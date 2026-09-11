@@ -40,6 +40,13 @@ final class ItemIntegrityInspectCommand {
         if (args.length == 0) {
             return false;
         }
+        if (args[0].equalsIgnoreCase("metrics")) {
+            if (hasPermission(sender)) {
+                ItemIntegritySystem current = system(sender);
+                if (current != null) sender.sendMessage(ChatColor.AQUA + "[ItemIntegrity] " + current.scannerMetrics());
+            }
+            return true;
+        }
         if (args[0].equalsIgnoreCase("inspect")) {
             if (!hasPermission(sender)) {
                 return true;
@@ -261,7 +268,11 @@ final class ItemIntegrityInspectCommand {
         line(sender, "PresenceState", record.state().name());
         line(sender, "HolderType", holder.type().name());
         line(sender, "holder logico", holder.describe());
-        if (holder instanceof HolderRef.PlayerHolder playerHolder) {
+        if (holder instanceof HolderRef.EnderChestHolder ender) {
+            line(sender, "player UUID", ender.playerId().toString());
+            line(sender, "player name", value(ender.playerName()));
+            line(sender, "slot", String.valueOf(ender.slot()));
+        } else if (holder instanceof HolderRef.PlayerHolder playerHolder) {
             line(sender, "player UUID", playerHolder.playerId().toString());
             line(sender, "player name", value(playerHolder.playerName()));
             line(sender, "slot", value(playerHolder.slot()));

@@ -13,6 +13,8 @@ import main.java.me.dniym.identity.presence.PresenceObservation;
 import main.java.me.dniym.identity.presence.PresenceRecord;
 import main.java.me.dniym.identity.presence.PresenceState;
 import main.java.me.dniym.identity.presence.PresenceStore;
+import main.java.me.dniym.identity.presence.DestinationWindow;
+import main.java.me.dniym.identity.presence.DestinationTrackingStore;
 import main.java.me.dniym.utils.Scheduler;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -64,6 +66,7 @@ public final class ConflictDetector {
     private final DiscordWebhookNotifier webhookNotifier;
     private final CaseFileLogger caseFileLogger;
     private final PresenceStore presenceStore;
+    private final DestinationWindow destinations;
     private final Map<String, IncidentMemory> activeIncidents = new ConcurrentHashMap<>();
     private final Map<String, Long> pendingRevalidations = new ConcurrentHashMap<>();
     private final Map<ChunkKey, Map<String, PendingContainerConflict>> pendingContainerConflicts =
@@ -73,6 +76,14 @@ public final class ConflictDetector {
     private final AtomicInteger suppressedPossibleConsoleCases = new AtomicInteger();
     private volatile long lastPossibleConsoleCaseMs;
     private volatile long lastIncidentCleanupMs;
+    private long revalidationCount, revalidationNanos, revalidationMaxNanos, revalidationSaturated;
+
+    public String metrics() {
+        return "pending-revalidations=" + pendingRevalidations.size() + " revalidation-count=" + revalidationCount
+                + " revalidation-total-ms=" + revalidationNanos / 1_000_000.0
+                + " revalidation-max-ms=" + revalidationMaxNanos / 1_000_000.0
+                + " revalidation-capacity-rejections=" + revalidationSaturated;
+    }
 
     public ConflictDetector(IllegalStack plugin, ItemIntegrityConfig config, IdentityService identityService,
                             DatabaseService databaseService, DiscordWebhookNotifier webhookNotifier,
@@ -84,6 +95,8 @@ public final class ConflictDetector {
         this.webhookNotifier = webhookNotifier;
         this.caseFileLogger = caseFileLogger;
         this.presenceStore = presenceStore;
+        this.destinations = presenceStore instanceof DestinationTrackingStore tracked ? tracked.destinations()
+                : new DestinationWindow(2048, 8, 30_000, System::currentTimeMillis);
     }
 
     public void handlePlayerInventoryObservation(Player player, int slot, ItemStack stack,
@@ -114,6 +127,16 @@ public final class ConflictDetector {
         handleConflict(null, -1, stack, identity, canonical, conflicting, decision, reason, false);
     }
 
+    public void handleStoredInventoryConflict(ItemStack stack, ItemIdentity identity, PresenceRecord canonical,
+                                              PresenceRecord conflicting) {
+        if (canonical.state().isTerminal() && !conflicting.state().isTerminal()) {
+            handleMonitorOnlyIncident(stack, identity, canonical, conflicting, "RESURRECTED_ITEM", RESURRECTED_REASON);
+            return;
+        }
+        handleConflict(null, -1, stack, identity, canonical, conflicting,
+                "ANOMALY_DETECTED", DUPLICATE_REASON, true);
+    }
+
     private void handleConflict(Player player, int slot, ItemStack stack, ItemIdentity identity,
                                 PresenceRecord canonical, PresenceRecord conflicting, String decision,
                                 String reason, boolean allowDelete) {
@@ -124,7 +147,7 @@ public final class ConflictDetector {
         if (confidence != ConflictConfidence.CRITICAL) {
             return;
         }
-        if (withinGrace(canonical, conflicting)) {
+        if (withinGrace(canonical, conflicting) && !config.conflictRevalidationEnabled()) {
             return;
         }
         ContainerConflictDisposition containerDisposition = reconcileContainerPresence(identity, canonical, conflicting);
@@ -150,6 +173,12 @@ public final class ConflictDetector {
             return;
         }
 
+        if (DUPLICATE_REASON.equals(reason)) {
+            allowDelete = false;
+            decision = "AMBIGUOUS_REVALIDATION";
+            confidence = ConflictConfidence.LOW;
+        }
+
         finalizeConflict(player, slot, stack, identity, canonical, conflicting, decision, reason, allowDelete,
                 confidence, RevalidationSummary.notRun());
     }
@@ -169,7 +198,7 @@ public final class ConflictDetector {
         if (!allowDelete) {
             intendedAction = ConflictAction.MONITOR_ONLY;
         }
-        boolean confirmedDuplicate = DUPLICATE_REASON.equals(reason) && allowDelete && !virtual;
+        boolean confirmedDuplicate = "CONFIRMED_DUPLICATE".equals(decision) && !virtual;
         boolean deleteAllowed = allowDelete;
 
         String key = incidentKey(identity.id(), canonical.holder(), conflicting.holder(), reason, configuredMode);
@@ -215,17 +244,21 @@ public final class ConflictDetector {
                 sendWebhook(snapshot, canonical, conflicting, confirmedDuplicate);
                 return;
             }
-            if (player == null) {
-                sendWebhook(withAction(snapshot, ConflictAction.DELETE_ABORTED_REVALIDATION_FAILED),
-                        canonical, conflicting, confirmedDuplicate);
-                return;
-            }
-            runOnPlayerThread(player, () -> {
-                ConflictAction action = removeIfStillConflicting(player, slot, identity)
-                        ? ConflictAction.REMOVED
-                        : ConflictAction.DELETE_ABORTED_REVALIDATION_FAILED;
-                sendWebhook(withAction(snapshot, action), canonical, conflicting, confirmedDuplicate);
-            });
+            Runnable remove = () -> {
+                ConflictAction action;
+                try {
+                    action = removeIfStillConflicting(identity, canonical, conflicting, stack)
+                            ? ConflictAction.REMOVED : ConflictAction.DELETE_ABORTED_REVALIDATION_FAILED;
+                } catch (RuntimeException error) {
+                    action = ConflictAction.DELETE_ABORTED_REVALIDATION_FAILED;
+                }
+                IntegrityCaseSnapshot completed = withAction(snapshot, action);
+                caseFileLogger.append(snapshot.caseId(), formatDetailedLog(completed, canonical, conflicting), confirmedDuplicate);
+                databaseService.writeAndConfirm(new AuditTask.PersistCase(completed))
+                        .thenRun(() -> sendWebhook(completed, canonical, conflicting, confirmedDuplicate));
+            };
+            if (player != null) runOnPlayerThread(player, remove);
+            else Scheduler.runTaskLater(plugin, remove, 1);
         });
     }
 
@@ -299,18 +332,31 @@ public final class ConflictDetector {
     private void scheduleTargetedRevalidation(Player player, int slot, ItemStack stack, ItemIdentity identity,
                                               PresenceRecord canonical, PresenceRecord conflicting, String decision,
                                               String reason, boolean allowDelete, ConflictConfidence confidence) {
-        String key = incidentKey(identity.id(), canonical.holder(), conflicting.holder(), reason,
-                config.conflictMode());
+        String key = identity.id();
         long now = System.currentTimeMillis();
+        pendingRevalidations.entrySet().removeIf(entry -> now - entry.getValue() > 30_000);
+        if (!pendingRevalidations.containsKey(key) && pendingRevalidations.size() >= config.revalidationPendingLimit()) {
+            revalidationSaturated++;
+            return;
+        }
         Long previous = pendingRevalidations.putIfAbsent(key, now);
         if (previous != null) {
+            destinations.observe(identity.id(), canonical.holder());
+            destinations.observe(identity.id(), conflicting.holder());
+            return;
+        }
+        if (!destinations.begin(identity.id(), canonical.holder(), conflicting.holder())) {
+            pendingRevalidations.remove(key);
             return;
         }
         ItemStack stackSnapshot = stack != null ? stack.clone() : null;
 
         Runnable task = () -> {
-            pendingRevalidations.remove(key);
+            if (!pendingRevalidations.remove(key, now)) return;
+            long started = System.nanoTime();
             TargetedRevalidation result = revalidateCurrentPhysicalState(identity, canonical, conflicting, now);
+            long elapsed = System.nanoTime() - started;
+            revalidationCount++; revalidationNanos += elapsed; revalidationMaxNanos = Math.max(revalidationMaxNanos, elapsed);
             if (result.status() == RevalidationStatus.TRANSIENT_RECONCILED) {
                 result.singlePresence().ifPresent(found ->
                         presenceStore.commitHandoff(identity, found.holder(), found.state()));
@@ -320,6 +366,11 @@ public final class ConflictDetector {
             PresenceRecord finalCanonical = result.canonical().orElse(canonical);
             PresenceRecord finalConflicting = result.conflicting().orElse(conflicting);
             boolean finalAllowDelete = allowDelete && result.status() == RevalidationStatus.CONFIRMED_DUPLICATE;
+            // If the original canonical instance moved, do not guess which remaining copy to destroy.
+            finalAllowDelete &= finalCanonical.holder().describe().equals(canonical.holder().describe());
+            ItemStack verified = physicalItem(finalConflicting.holder());
+            if (verified == null) finalAllowDelete = false;
+            ItemStack finalStack = verified != null ? verified.clone() : stackSnapshot;
             String finalDecision = switch (result.status()) {
                 case CONFIRMED_DUPLICATE -> "CONFIRMED_DUPLICATE";
                 case AMBIGUOUS_REVALIDATION -> "AMBIGUOUS_REVALIDATION";
@@ -331,22 +382,41 @@ public final class ConflictDetector {
             ConflictConfidence finalConfidence = result.status() == RevalidationStatus.CONFIRMED_DUPLICATE
                     ? confidence
                     : ConflictConfidence.LOW;
-            finalizeConflict(player, slot, stackSnapshot, identity, finalCanonical, finalConflicting, finalDecision,
+            finalizeConflict(player, slot, finalStack, identity, finalCanonical, finalConflicting, finalDecision,
                     finalReason, finalAllowDelete, finalConfidence, result.summary());
         };
 
         long delay = config.conflictRevalidationDelayTicks();
-        if (player != null && player.isOnline()) {
-            Scheduler.runTaskLater(plugin, task, delay, player);
-        } else {
-            Scheduler.runTaskLater(plugin, task, delay);
+        try {
+            if (player != null && player.isOnline()) {
+                Scheduler.runTaskLater(plugin, task, delay, player);
+            } else {
+                Scheduler.runTaskLater(plugin, task, delay);
+            }
+        } catch (RuntimeException error) {
+            pendingRevalidations.remove(key, now);
+            destinations.finish(identity.id());
         }
     }
 
-    private TargetedRevalidation revalidateCurrentPhysicalState(ItemIdentity identity, PresenceRecord canonical,
+    TargetedRevalidation revalidateCurrentPhysicalState(ItemIdentity identity, PresenceRecord canonical,
                                                                 PresenceRecord conflicting, long firstObservedAtMs) {
-        List<PhysicalPresence> canonicalFound = findPhysicalPresences(identity, canonical.holder());
-        List<PhysicalPresence> conflictingFound = findPhysicalPresences(identity, conflicting.holder());
+        presenceStore.getCanonical(identity).ifPresent(p -> destinations.observe(identity.id(), p.holder()));
+        presenceStore.getLastDivergentObservation(identity).ifPresent(p -> destinations.observe(identity.id(), p.holder()));
+        DestinationWindow.Result hints = destinations.finish(identity.id());
+        Map<String, List<PhysicalPresence>> reads = new java.util.LinkedHashMap<>();
+        List<PhysicalPresence> canonicalFound = reads.computeIfAbsent(HolderRef.logicalOwnerKey(canonical.holder()),
+                ignored -> findPhysicalPresences(identity, canonical.holder()));
+        List<PhysicalPresence> conflictingFound = new ArrayList<>(reads.computeIfAbsent(HolderRef.logicalOwnerKey(conflicting.holder()),
+                ignored -> findPhysicalPresences(identity, conflicting.holder())));
+        for (HolderRef destination : hints.holders()) {
+            if (!reads.containsKey(HolderRef.logicalOwnerKey(destination))) {
+                List<PhysicalPresence> extra = findPhysicalPresences(identity, destination);
+                reads.put(HolderRef.logicalOwnerKey(destination), extra);
+                conflictingFound.addAll(extra);
+            }
+        }
+        if (hints.incomplete()) conflictingFound.add(PhysicalPresence.unavailable(conflicting.holder(), "limite/expiracao de destinos"));
         boolean unavailable = canonicalFound.stream().anyMatch(PhysicalPresence::unavailable)
                 || conflictingFound.stream().anyMatch(PhysicalPresence::unavailable);
 
@@ -409,6 +479,27 @@ public final class ConflictDetector {
     }
 
     private List<PhysicalPresence> findPhysicalPresences(ItemIdentity identity, HolderRef holder) {
+        try {
+            return findPhysicalPresencesUnsafe(identity, holder);
+        } catch (RuntimeException error) {
+            return List.of(PhysicalPresence.unavailable(holder, "falha ao consultar estado fisico"));
+        }
+    }
+
+    private List<PhysicalPresence> findPhysicalPresencesUnsafe(ItemIdentity identity, HolderRef holder) {
+        if (IllegalStack.isFoliaServer()) return List.of(PhysicalPresence.unavailable(holder, "revalidacao multi-regiao nao suportada"));
+        if (holder instanceof HolderRef.EnderChestHolder ender) {
+            Player owner = Bukkit.getPlayer(ender.playerId());
+            if (owner == null || !owner.isOnline()) return List.of(PhysicalPresence.unavailable(holder, "dono do Ender Chest offline"));
+            List<PhysicalPresence> found = new ArrayList<>();
+            ItemStack[] items = owner.getEnderChest().getContents();
+            for (int slot = 0; slot < items.length; slot++) if (sameIdentity(items[slot], identity)) {
+                found.add(PhysicalPresence.found(new PresenceRecord(identity,
+                        new HolderRef.EnderChestHolder(owner.getUniqueId(), owner.getName(), slot),
+                        PresenceState.PERSISTED_CONTAINER, 1, System.currentTimeMillis())));
+            }
+            return found;
+        }
         if (holder instanceof HolderRef.PlayerHolder playerHolder) {
             return findInPlayerInventory(identity, playerHolder);
         }
@@ -799,6 +890,7 @@ public final class ConflictDetector {
         if (holder instanceof HolderRef.PlayerHolder player && player.slot() != null) {
             return key + ":slot" + player.slot();
         }
+        if (holder instanceof HolderRef.EnderChestHolder ender && ender.slot() != null) return key + ":slot" + ender.slot();
         if (holder instanceof HolderRef.ContainerHolder container && container.slot() != null) {
             return key + ":slot" + container.slot();
         }
@@ -841,25 +933,56 @@ public final class ConflictDetector {
         activeIncidents.entrySet().removeIf(entry -> entry.getValue().lastObservedAtMs() < staleBefore);
     }
 
-    private boolean removeIfStillConflicting(Player player, int slot, ItemIdentity identity) {
-        PlayerInventory inv = player.getInventory();
-        if (slot >= 0) {
-            ItemStack current = inv.getItem(slot);
-            if (sameIdentity(current, identity)) {
-                inv.setItem(slot, null);
-                player.sendMessage(ChatColor.RED + "[ItemIntegrity] Item duplicado removido: " + identity.id());
-                return true;
-            }
-            return false;
-        }
+    boolean removeIfStillConflicting(ItemIdentity identity, PresenceRecord canonical,
+                                             PresenceRecord conflicting, ItemStack expected) {
+        if (IllegalStack.isFoliaServer() || expected == null) return false;
+        if (!(conflicting.holder() instanceof HolderRef.PlayerHolder)
+                && !(conflicting.holder() instanceof HolderRef.EnderChestHolder)) return false;
+        if (canonical.holder().describe().equals(conflicting.holder().describe())) return false;
+        List<PhysicalPresence> official = findPhysicalPresences(identity, canonical.holder());
+        if (official.stream().anyMatch(PhysicalPresence::unavailable)
+                || official.stream().noneMatch(p -> p.record().holder().describe().equals(canonical.holder().describe()))) return false;
+        Inventory target = physicalInventory(conflicting.holder());
+        Integer slot = holderSlot(conflicting.holder());
+        if (target == null || slot == null || slot < 0 || slot >= target.getSize()) return false;
+        ItemStack current = target.getItem(slot);
+        if (!sameIdentity(current, identity) || !expected.equals(current)) return false;
+        target.setItem(slot, null);
+        return true;
+    }
 
-        ItemStack offHand = inv.getItemInOffHand();
-        if (sameIdentity(offHand, identity)) {
-            inv.setItemInOffHand(null);
-            player.sendMessage(ChatColor.RED + "[ItemIntegrity] Item duplicado removido: " + identity.id());
-            return true;
+    private Integer holderSlot(HolderRef holder) {
+        if (holder instanceof HolderRef.PlayerHolder p) return p.slot();
+        if (holder instanceof HolderRef.EnderChestHolder p) return p.slot();
+        if (holder instanceof HolderRef.ContainerHolder c) return c.slot();
+        return null;
+    }
+
+    private Inventory physicalInventory(HolderRef holder) {
+        if (IllegalStack.isFoliaServer()) return null;
+        if (holder instanceof HolderRef.PlayerHolder p) {
+            Player owner = Bukkit.getPlayer(p.playerId());
+            return owner != null && owner.isOnline() ? owner.getInventory() : null;
         }
-        return false;
+        if (holder instanceof HolderRef.EnderChestHolder p) {
+            Player owner = Bukkit.getPlayer(p.playerId());
+            return owner != null && owner.isOnline() ? owner.getEnderChest() : null;
+        }
+        if (holder instanceof HolderRef.ContainerHolder c) {
+            World world = Bukkit.getWorld(c.world());
+            if (world != null && world.isChunkLoaded(c.x() >> 4, c.z() >> 4)
+                    && world.getBlockAt(c.x(), c.y(), c.z()).getState() instanceof Container container) return container.getInventory();
+        }
+        return null;
+    }
+
+    private ItemStack physicalItem(HolderRef holder) {
+        Inventory inventory = physicalInventory(holder);
+        Integer slot = holderSlot(holder);
+        if (inventory != null && slot != null && slot >= 0 && slot < inventory.getSize()) return inventory.getItem(slot);
+        if (holder instanceof HolderRef.ItemEntityHolder e && !IllegalStack.isFoliaServer()
+                && Bukkit.getEntity(e.entityUuid()) instanceof Item item && item.isValid()) return item.getItemStack();
+        return null;
     }
 
     private boolean sameIdentity(ItemStack stack, ItemIdentity identity) {
@@ -883,7 +1006,7 @@ public final class ConflictDetector {
              BukkitObjectOutputStream objectOut = new BukkitObjectOutputStream(out)) {
             objectOut.writeObject(stack);
             return out.toByteArray();
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             LOGGER.warn("[ItemIntegrity] Falha ao serializar snapshot do item conflitante - FAIL_OPEN para DELETE.", e);
             return null;
         }
@@ -1064,6 +1187,10 @@ public final class ConflictDetector {
         StringBuilder sb = new StringBuilder();
         sb.append("Holder: ").append(holder.type().name()).append('\n');
         sb.append("Logical holder: ").append(holder.describe()).append('\n');
+        if (holder instanceof HolderRef.EnderChestHolder ender) {
+            sb.append("Ender Chest owner: ").append(ender.playerName()).append(" / ").append(ender.playerId()).append('\n');
+            sb.append("Slot: ").append(ender.slot()).append('\n');
+        }
         if (holder instanceof HolderRef.PlayerHolder p) {
             sb.append("Player: ").append(p.playerName()).append(" / ").append(p.playerId()).append('\n');
             sb.append("Slot: ").append(p.slot()).append('\n');
@@ -1100,7 +1227,7 @@ public final class ConflictDetector {
         return sb.toString();
     }
 
-    private enum RevalidationStatus {
+    enum RevalidationStatus {
         CONFIRMED_DUPLICATE,
         TRANSIENT_RECONCILED,
         AMBIGUOUS_REVALIDATION
@@ -1119,7 +1246,7 @@ public final class ConflictDetector {
     private record PendingContainerLocator(ChunkKey chunk, String key, long expiresAtMs) {
     }
 
-    private record TargetedRevalidation(RevalidationStatus status, RevalidationSummary summary,
+    record TargetedRevalidation(RevalidationStatus status, RevalidationSummary summary,
                                         java.util.Optional<PresenceRecord> canonical,
                                         java.util.Optional<PresenceRecord> conflicting,
                                         java.util.Optional<PresenceRecord> singlePresence) {
@@ -1144,7 +1271,7 @@ public final class ConflictDetector {
                     REVALIDACAO DIRECIONADA
                     Delay observado: %dms
                     Canonical encontrado: %s
-                    Conflitante encontrado: %s
+                    Conflitante/destinos observados encontrados: %s
                     """.formatted(initialCanonical, initialConflicting, elapsedMs,
                     describeFound(canonicalFound), describeFound(conflictingFound));
         }

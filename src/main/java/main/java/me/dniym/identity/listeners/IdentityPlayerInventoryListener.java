@@ -3,6 +3,9 @@ package main.java.me.dniym.identity.listeners;
 import main.java.me.dniym.IllegalStack;
 import main.java.me.dniym.enums.Protections;
 import main.java.me.dniym.identity.ItemIdentity;
+import main.java.me.dniym.identity.IdentityService;
+import main.java.me.dniym.identity.TrackabilityPolicy;
+import io.papermc.paper.event.player.PlayerInventorySlotChangeEvent;
 import main.java.me.dniym.identity.MigrationResult;
 import main.java.me.dniym.identity.MigrationService;
 import main.java.me.dniym.identity.VirtualCustodyService;
@@ -43,6 +46,8 @@ public final class IdentityPlayerInventoryListener implements Listener {
 
     private final Plugin plugin;
     private final MigrationService migrationService;
+    private final IdentityService identityService;
+    private final boolean useSlotEvents;
     private final PresenceStore presenceStore;
     private final AuditQueue auditQueue;
     private final ConflictDetector conflictDetector;
@@ -52,6 +57,8 @@ public final class IdentityPlayerInventoryListener implements Listener {
     private final Map<java.util.UUID, PendingPlayerScan> pendingScans = new ConcurrentHashMap<>();
     private final Map<ExternalCheckKey, Map<String, ItemIdentity>> pendingExternalChecks = new ConcurrentHashMap<>();
     private final AtomicInteger suppressedDivergentWarnings = new AtomicInteger();
+    private final Map<java.util.UUID, Map<Integer, PresenceRecord>> slotCache = new ConcurrentHashMap<>();
+    private long slotEvents, slotNanos, maxSlotNanos, scannedPlayers, scannedSlots, scanNanos;
     private int nextPlayerIndex;
     private long lastStatsLogMs;
     private volatile long lastDivergentWarningMs;
@@ -59,17 +66,19 @@ public final class IdentityPlayerInventoryListener implements Listener {
     public IdentityPlayerInventoryListener(Plugin plugin, MigrationService migrationService,
                                            PresenceStore presenceStore, AuditQueue auditQueue,
                                            ConflictDetector conflictDetector, ItemIntegrityConfig config,
-                                           VirtualCustodyService virtualCustodyService) {
+                                           VirtualCustodyService virtualCustodyService, IdentityService identityService) {
         this.plugin = plugin;
         this.migrationService = migrationService;
+        this.identityService = identityService;
         this.presenceStore = presenceStore;
         this.auditQueue = auditQueue;
         this.conflictDetector = conflictDetector;
         this.config = config;
+        this.useSlotEvents = config.slotEventsEnabled() && !IllegalStack.isFoliaServer();
         this.virtualCustodyService = virtualCustodyService;
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
 
-        long period = Math.max(1, Protections.ItemScanTimer.getIntValue());
+        long period = slotEventsEnabled() ? config.reconciliationPeriodTicks() : Math.max(1, Protections.ItemScanTimer.getIntValue());
         Scheduler.runTaskTimer(plugin, this::periodicScan, period, period);
     }
 
@@ -84,6 +93,49 @@ public final class IdentityPlayerInventoryListener implements Listener {
         pendingScans.remove(id);
         pendingExternalChecks.keySet().removeIf(key -> key.playerId().equals(id));
         scanPlayer(event.getPlayer(), PresenceState.OFFLINE_COMMITTED);
+        slotCache.remove(id);
+    }
+
+    public boolean slotEventsEnabled() { return useSlotEvents; }
+
+    /** The event's converted slot belongs to PlayerInventory, not to a container's raw slots. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onSlotChange(PlayerInventorySlotChangeEvent event) {
+        if (!slotEventsEnabled() || event.isAsynchronous()) return;
+        long started = System.nanoTime();
+        try {
+            Player player = event.getPlayer();
+            int slot = event.getSlot();
+            if (slot < 0 || slot >= player.getInventory().getSize()
+                    || event.getPlayer().getOpenInventory().getInventory(event.getRawSlot()) != player.getInventory()) return;
+            ItemStack previous = event.getOldItemStack();
+            ItemStack live = player.getInventory().getItem(slot);
+            if (!TrackabilityPolicy.isCandidate(previous) && !TrackabilityPolicy.isCandidate(live)) {
+                Map<Integer, PresenceRecord> cached = slotCache.get(player.getUniqueId());
+                PresenceRecord removed = cached == null ? null : cached.remove(slot);
+                if (removed != null) scheduleExternalCustodyCheck(player, removed.identity());
+                return;
+            }
+            ItemIdentity old = TrackabilityPolicy.isCandidate(previous) ? identityService.readIdentity(previous) : null;
+            Map<Integer, PresenceRecord> cache = slotCache.computeIfAbsent(player.getUniqueId(), ignored -> new HashMap<>());
+            cache.remove(slot);
+            Map<String, PresenceRecord> siblings = new HashMap<>();
+            cache.values().forEach(record -> siblings.putIfAbsent(record.identity().id(), record));
+            // Never migrate the event's clones: inspect/write the current physical slot only.
+            ItemIdentity current = observeSlot(player, slot, live,
+                    PresenceState.LIVE_CONFIRMED, siblings);
+            if (old != null && (current == null || !old.id().equals(current.id()))) scheduleExternalCustodyCheck(player, old);
+        } finally {
+            long elapsed = System.nanoTime() - started;
+            slotEvents++; slotNanos += elapsed; maxSlotNanos = Math.max(maxSlotNanos, elapsed);
+        }
+    }
+
+    public String metrics() {
+        return "slot-events=" + slotEvents + " slot-total-ms=" + slotNanos / 1_000_000.0
+                + " slot-max-ms=" + maxSlotNanos / 1_000_000.0 + " scanned-players=" + scannedPlayers
+                + " scanned-slots=" + scannedSlots + " scan-total-ms=" + scanNanos / 1_000_000.0
+                + " pending-player-scans=" + pendingScans.size() + " pending-custody=" + pendingExternalChecks.size();
     }
 
     private void periodicScan() {
@@ -103,6 +155,8 @@ public final class IdentityPlayerInventoryListener implements Listener {
         while (playersProcessed < maxPlayers && itemsProcessed < maxItems && playersProcessed < players.size()) {
             int index = Math.floorMod(initialIndex + playersProcessed, players.size());
             Player player = players.get(index);
+            int cost = estimatedInventorySize(player);
+            if (playersProcessed > 0 && itemsProcessed + cost > maxItems) break;
             scanPlayer(player, PresenceState.LIVE_CONFIRMED);
             playersProcessed++;
             itemsProcessed += estimatedInventorySize(player);
@@ -137,6 +191,8 @@ public final class IdentityPlayerInventoryListener implements Listener {
             return;
         }
         PlayerInventory inv = player.getInventory();
+        long started = System.nanoTime();
+        slotCache.computeIfAbsent(player.getUniqueId(), ignored -> new HashMap<>()).clear();
         Map<String, PresenceRecord> seenThisScan = new HashMap<>();
         Map<String, ItemIdentity> currentSeen = new HashMap<>();
         ItemStack[] contents = inv.getContents();
@@ -153,26 +209,77 @@ public final class IdentityPlayerInventoryListener implements Listener {
             }
         }
         updateMissingItems(player, state, currentSeen);
+        scanEnderChest(player, state == PresenceState.OFFLINE_COMMITTED ? state : PresenceState.PERSISTED_CONTAINER);
+        scannedPlayers++; scannedSlots += contents.length + player.getEnderChest().getSize();
+        scanNanos += System.nanoTime() - started;
+    }
+
+    public void scanEnderChest(Player player, PresenceState state) {
+        scanEnderChest(player, state, player.getEnderChest().getContents());
+    }
+
+    public void scanEnderChest(Player player, PresenceState state, ItemStack[] contents) {
+        Map<String, PresenceRecord> seen = new HashMap<>();
+        for (int slot = 0; slot < contents.length; slot++) {
+            ItemStack item = contents[slot];
+            if (!TrackabilityPolicy.isCandidate(item)) continue;
+            MigrationResult result = migrationService.ensureIdentity(item, player.getLocation());
+            if (result == null) continue;
+            ItemIdentity id = result.identity();
+            registerFresh(result, item, player);
+            HolderRef holder = new HolderRef.EnderChestHolder(player.getUniqueId(), player.getName(), slot);
+            presenceStore.getCanonical(id).map(PresenceRecord::holder)
+                    .filter(previous -> previous instanceof HolderRef.VirtualHolder virtual
+                            && HolderRef.normalizeVirtualLabel(virtual.label()).equals("ender_chest")
+                            && player.getUniqueId().toString().equals(virtual.viewerOrOwner()))
+                    .ifPresent(previous -> presenceStore.commitHandoff(id, holder, state));
+            PresenceRecord candidate = new PresenceRecord(id, holder, state, 1, System.currentTimeMillis());
+            PresenceRecord retained = presenceStore.getCanonical(id).orElse(null);
+            if (retained != null && !retained.state().isTerminal()
+                    && retained.holder() instanceof HolderRef.EnderChestHolder previous
+                    && previous.playerId().equals(player.getUniqueId()) && previous.slot() != null
+                    && previous.slot() != slot && previous.slot() >= 0 && previous.slot() < contents.length
+                    && hasIdentity(contents[previous.slot()], id)) {
+                seen.put(id.id(), retained);
+                if (conflictDetector != null) conflictDetector.handleStoredInventoryConflict(item, id, retained, candidate);
+                continue;
+            }
+            PresenceRecord duplicate = seen.putIfAbsent(id.id(), candidate);
+            if (duplicate != null && !duplicate.holder().describe().equals(holder.describe()) && conflictDetector != null) {
+                conflictDetector.handleStoredInventoryConflict(item, id, duplicate, candidate);
+                continue;
+            }
+            PresenceObservation observation = presenceStore.observe(id, holder, state);
+            if (!observation.sameOwnerAsCanonical() && conflictDetector != null) {
+                conflictDetector.handleStoredInventoryConflict(item, id, observation.canonicalBefore().orElseThrow(), candidate);
+            }
+        }
     }
 
     private ItemIdentity observeSlot(Player player, int slot, ItemStack stack, PresenceState state,
                                      Map<String, PresenceRecord> seenThisScan) {
+        if (!TrackabilityPolicy.isCandidate(stack)) return null;
         MigrationResult migration = migrationService.ensureIdentity(stack, player.getLocation());
         if (migration == null) {
             return null;
         }
         ItemIdentity identity = migration.identity();
 
-        if (migration.freshlyAssigned() && auditQueue != null) {
-            ItemSnapshot snapshot = new ItemSnapshot(identity.id(), stack.getType().name(),
-                    identity.registeredAtEpochMs(), identity.origin().name(),
-                    identity.registeredWorldRaw(), identity.registeredX(), identity.registeredY(), identity.registeredZ(),
-                    player.getUniqueId().toString(), identity.registeredAtEpochMs());
-            auditQueue.offer(new AuditTask.RegisterItem(snapshot));
-        }
+        registerFresh(migration, stack, player);
 
         HolderRef holder = new HolderRef.PlayerHolder(player.getUniqueId(), player.getName(), slot == -1 ? null : slot);
         PresenceRecord candidate = new PresenceRecord(identity, holder, state, 1, System.currentTimeMillis());
+        slotCache.computeIfAbsent(player.getUniqueId(), ignored -> new HashMap<>()).put(slot, candidate);
+        PresenceRecord retained = presenceStore.getCanonical(identity).orElse(null);
+        if (retained != null && !retained.state().isTerminal()
+                && retained.holder() instanceof HolderRef.PlayerHolder previous
+                && previous.playerId().equals(player.getUniqueId()) && previous.slot() != null
+                && previous.slot() != slot && previous.slot() >= 0 && previous.slot() < player.getInventory().getSize()
+                && hasIdentity(player.getInventory().getItem(previous.slot()), identity)) {
+            seenThisScan.put(identity.id(), retained);
+            if (conflictDetector != null) conflictDetector.handlePlayerInventoryConflict(player, slot, stack, identity, retained, candidate);
+            return identity;
+        }
         PresenceRecord scanDuplicate = seenThisScan.get(identity.id());
         if (scanDuplicate != null && conflictDetector != null
                 && !scanDuplicate.holder().describe().equals(holder.describe())) {
@@ -191,6 +298,20 @@ public final class IdentityPlayerInventoryListener implements Listener {
             conflictDetector.handlePlayerInventoryObservation(player, slot, stack, observation);
         }
         return identity;
+    }
+
+    private void registerFresh(MigrationResult migration, ItemStack stack, Player player) {
+        if (!migration.freshlyAssigned() || auditQueue == null) return;
+        ItemIdentity identity = migration.identity();
+        auditQueue.offer(new AuditTask.RegisterItem(new ItemSnapshot(identity.id(), stack.getType().name(),
+                identity.registeredAtEpochMs(), identity.origin().name(), identity.registeredWorldRaw(),
+                identity.registeredX(), identity.registeredY(), identity.registeredZ(), player.getUniqueId().toString(),
+                identity.registeredAtEpochMs())));
+    }
+
+    private boolean hasIdentity(ItemStack stack, ItemIdentity expected) {
+        ItemIdentity current = identityService.readIdentity(stack);
+        return current != null && expected.id().equals(current.id());
     }
 
     private void updateMissingItems(Player player, PresenceState state, Map<String, ItemIdentity> currentSeen) {
@@ -258,7 +379,7 @@ public final class IdentityPlayerInventoryListener implements Listener {
             return 0;
         }
         int contents = player.getInventory().getSize();
-        return contents > 40 ? contents : contents + 1;
+        return (contents > 40 ? contents : contents + 1) + player.getEnderChest().getSize();
     }
 
     private record PendingPlayerScan(PresenceState state) {}

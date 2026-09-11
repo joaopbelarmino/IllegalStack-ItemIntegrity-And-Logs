@@ -388,6 +388,7 @@ public class IllegalStackCommand implements CommandExecutor, TabCompleter {
         arguments.add("toggle");
         arguments.add("reload");
         arguments.add("inspect");
+        arguments.add("metrics");
         arguments.add("lookup");
         arguments.add("restart");
 

@@ -28,6 +28,34 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class InventoryWorkBatchTest {
+    @Test void ownedEnderUsesOwnerScanButSimilarPluginGuiStaysVirtual() {
+        try (MockedStatic<Scheduler> scheduler = mockStatic(Scheduler.class);
+             var registries = main.java.me.dniym.identity.TestMenuRegistry.install()) {
+            List<Runnable> jobs = jobs(scheduler);
+            var scanner = mock(IdentityPlayerInventoryListener.class);
+            var listener = new ItemIntegrityLifecycleListener(mock(IllegalStack.class, RETURNS_DEEP_STUBS),
+                    mock(IdentityService.class), mock(MigrationService.class), new InMemoryPresenceStore(),
+                    null, null, scanner, mock(VirtualCustodyService.class));
+            Player player = player();
+            Inventory owned = mock(Inventory.class), similar = mock(Inventory.class);
+            InventoryType type = InventoryType.ENDER_CHEST;
+            when(player.getEnderChest()).thenReturn(owned);
+            when(owned.getType()).thenReturn(type);
+            when(similar.getType()).thenReturn(type);
+            when(owned.getContents()).thenReturn(new ItemStack[27]);
+            when(similar.getContents()).thenReturn(new ItemStack[27]);
+            var event = mock(org.bukkit.event.inventory.InventoryOpenEvent.class);
+            when(event.getPlayer()).thenReturn(player);
+            when(event.getInventory()).thenReturn(similar);
+            listener.onEnderOpen(event);
+            assertTrue(jobs.isEmpty());
+            when(event.getInventory()).thenReturn(owned);
+            listener.onEnderOpen(event);
+            assertEquals(1, jobs.size());
+            jobs.removeFirst().run();
+            verify(scanner).scanEnderChest(eq(player), eq(PresenceState.PERSISTED_CONTAINER), any(ItemStack[].class));
+        }
+    }
     @Test void pickupRequestsCoalesceAndQuitCancelsPendingWork() {
         try (MockedStatic<Scheduler> scheduler = mockStatic(Scheduler.class)) {
             List<Runnable> jobs = jobs(scheduler);
@@ -145,7 +173,7 @@ class InventoryWorkBatchTest {
         ItemIntegrityConfig config = mock(ItemIntegrityConfig.class);
         when(config.externalCustodyMissingConfirmDelayTicks()).thenReturn(10L);
         return new IdentityPlayerInventoryListener(mock(IllegalStack.class, RETURNS_DEEP_STUBS),
-                mock(MigrationService.class), new InMemoryPresenceStore(), null, null, config, custody);
+                mock(MigrationService.class), new InMemoryPresenceStore(), null, null, config, custody, mock(IdentityService.class));
     }
     private static Player player() {
         Player player = mock(Player.class);

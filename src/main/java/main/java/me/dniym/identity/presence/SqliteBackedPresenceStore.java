@@ -124,6 +124,8 @@ public final class SqliteBackedPresenceStore implements PresenceStore {
             if (type == HolderType.PLAYER) {
                 if (playerUuidStr == null) return null;
                 holder = new HolderRef.PlayerHolder(UUID.fromString(playerUuidStr), playerName, slot);
+            } else if (type == HolderType.ENDER_CHEST && playerUuidStr != null) {
+                holder = new HolderRef.EnderChestHolder(UUID.fromString(playerUuidStr), playerName, slot);
             } else if (type == HolderType.ITEM_ENTITY) {
                 if (entityUuidStr == null) return null;
                 holder = new HolderRef.ItemEntityHolder(UUID.fromString(entityUuidStr), null, world, x, y, z);
@@ -282,6 +284,9 @@ public final class SqliteBackedPresenceStore implements PresenceStore {
     private record HolderFields(String playerUuid, String playerName, String entityUuid,
                                  String world, Integer x, Integer y, Integer z, Integer slot) {
         static HolderFields of(HolderRef holder) {
+            if (holder instanceof HolderRef.EnderChestHolder p) {
+                return new HolderFields(p.playerId().toString(), p.playerName(), null, null, null, null, null, p.slot());
+            }
             if (holder instanceof HolderRef.PlayerHolder p) {
                 return new HolderFields(p.playerId().toString(), p.playerName(), null, null, null, null, null, p.slot());
             }
