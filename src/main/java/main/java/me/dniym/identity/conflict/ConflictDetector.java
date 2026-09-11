@@ -69,6 +69,7 @@ public final class ConflictDetector {
     private final DestinationWindow destinations;
     private final Map<String, IncidentMemory> activeIncidents = new ConcurrentHashMap<>();
     private final Map<String, Long> pendingRevalidations = new ConcurrentHashMap<>();
+    private long lastPendingCleanupMs;
     private final Map<ChunkKey, Map<String, PendingContainerConflict>> pendingContainerConflicts =
             new ConcurrentHashMap<>();
     private final ConcurrentLinkedQueue<PendingContainerLocator> pendingContainerOrder = new ConcurrentLinkedQueue<>();
@@ -96,7 +97,7 @@ public final class ConflictDetector {
         this.caseFileLogger = caseFileLogger;
         this.presenceStore = presenceStore;
         this.destinations = presenceStore instanceof DestinationTrackingStore tracked ? tracked.destinations()
-                : new DestinationWindow(2048, 8, 30_000, System::currentTimeMillis);
+                : new DestinationWindow(2048, 8, DestinationWindow.DEFAULT_TTL_MS, System::currentTimeMillis);
     }
 
     public void handlePlayerInventoryObservation(Player player, int slot, ItemStack stack,
@@ -190,7 +191,7 @@ public final class ConflictDetector {
         boolean virtual = isVirtual(canonical.holder()) || isVirtual(conflicting.holder());
         ConflictMode configuredMode = config.conflictMode();
         ConflictAction intendedAction = configuredMode == ConflictMode.DELETE && allowDelete && !virtual
-                ? ConflictAction.REMOVED
+                ? ConflictAction.DELETE_PENDING
                 : ConflictAction.WOULD_REMOVE;
         if (configuredMode == ConflictMode.DELETE && virtual) {
             intendedAction = ConflictAction.DELETE_ABORTED_VIRTUAL_HOLDER;
@@ -255,7 +256,13 @@ public final class ConflictDetector {
                 IntegrityCaseSnapshot completed = withAction(snapshot, action);
                 caseFileLogger.append(snapshot.caseId(), formatDetailedLog(completed, canonical, conflicting), confirmedDuplicate);
                 databaseService.writeAndConfirm(new AuditTask.PersistCase(completed))
-                        .thenRun(() -> sendWebhook(completed, canonical, conflicting, confirmedDuplicate));
+                        .whenComplete((saved, error) -> {
+                            if (error != null || !Boolean.TRUE.equals(saved)) {
+                                LOGGER.error("[ItemIntegrity] Case {}: resultado final {} nao persistido; SQLite permanece DELETE_PENDING. Consulte o log de casos.",
+                                        completed.caseId(), completed.action());
+                            }
+                            sendWebhook(completed, canonical, conflicting, confirmedDuplicate);
+                        });
             };
             if (player != null) runOnPlayerThread(player, remove);
             else Scheduler.runTaskLater(plugin, remove, 1);
@@ -334,7 +341,10 @@ public final class ConflictDetector {
                                               String reason, boolean allowDelete, ConflictConfidence confidence) {
         String key = identity.id();
         long now = System.currentTimeMillis();
-        pendingRevalidations.entrySet().removeIf(entry -> now - entry.getValue() > 30_000);
+        if (now - lastPendingCleanupMs >= DestinationWindow.DEFAULT_TTL_MS) {
+            pendingRevalidations.entrySet().removeIf(entry -> now - entry.getValue() >= DestinationWindow.DEFAULT_TTL_MS);
+            lastPendingCleanupMs = now;
+        }
         if (!pendingRevalidations.containsKey(key) && pendingRevalidations.size() >= config.revalidationPendingLimit()) {
             revalidationSaturated++;
             return;
@@ -1107,6 +1117,7 @@ public final class ConflictDetector {
     private String translateAction(String action) {
         return switch (action) {
             case "WOULD_REMOVE" -> "Removeria se estivesse em DELETE";
+            case "DELETE_PENDING" -> "Remocao pendente de revalidacao final";
             case "REMOVED" -> "Item conflitante removido";
             case "MONITOR_ONLY" -> "Somente monitoramento";
             case "DELETE_ABORTED_REVALIDATION_FAILED" -> "Remocao abortada: revalidacao falhou";

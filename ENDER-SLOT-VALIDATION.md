@@ -28,11 +28,20 @@ playerdata backups and stack UUID tracking are explicitly NOT included.
   location still to contain the ID AND the target stack to match its snapshot.
   Only a conflicting player/Ender slot can be removed. If the canonical moved,
   the case remains monitor-only rather than guessing which copy is canonical.
-  SQLite commit must still succeed first; the final outcome is also recorded.
+  SQLite first commits DELETE_PENDING and the immutable original snapshot.
+  After the final check, only the pending action is updated to the actual outcome.
+  A failed final write leaves DELETE_PENDING (not proof of removal) and emits an
+  error; the case file and webhook still report the observed outcome. Historical
+  REMOVED rows cannot be repaired without independent evidence.
 - PlayerInventorySlotChangeEvent uses the converted slot and verifies it belongs
   to PlayerInventory. It observes the live slot, never migrates event clones.
   Mainhand/offhand/armor aliases still reconcile; two distinct physical slots
   continue to reach targeted revalidation. Ordinary stackable changes skip PDC.
+  Destination-first notifications verify cached sibling slots physically before
+  scheduling a conflict. Out-of-range raw slots from changed views are ignored.
+  Pending-map expiry sweeps run at most once per TTL, without a new task;
+  destination expiry walks only the expired insertion-order prefix.
+  Player removal chat remains intentionally absent; administrators receive cases.
 - Pickup/click/creative/armor/command full-player scans are no longer requested
   in paths covered by slot events. Existing specialized lifecycle handlers and
   the slower fallback scanner remain. This does not promise coverage for every

@@ -7,6 +7,7 @@ import java.util.function.LongSupplier;
 
 /** Bounded evidence hints for pending conflicts, never evidence of physical duplication. */
 public final class DestinationWindow {
+    public static final long DEFAULT_TTL_MS = 30_000;
     private final Map<String, Entry> pending = new LinkedHashMap<>();
     private final int capacity, destinations;
     private final long ttlMs;
@@ -16,7 +17,12 @@ public final class DestinationWindow {
     }
     public synchronized boolean begin(String id, HolderRef first, HolderRef second) {
         long now = clock.getAsLong();
-        pending.entrySet().removeIf(e -> e.getValue().expires <= now);
+        // Insertion order is expiry order: visit only the expired prefix.
+        var expired = pending.entrySet().iterator();
+        while (expired.hasNext()) {
+            if (expired.next().getValue().expires > now) break;
+            expired.remove();
+        }
         if (!pending.containsKey(id) && pending.size() >= capacity) return false;
         pending.computeIfAbsent(id, ignored -> new Entry(now + ttlMs));
         observe(id, first); observe(id, second);

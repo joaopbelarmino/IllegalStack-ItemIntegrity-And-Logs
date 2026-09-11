@@ -35,6 +35,40 @@ class SlotObservationTest {
     private final Inventory ender = mock(Inventory.class);
     private final InventoryView view = mock(InventoryView.class);
 
+    @Test void destinationFirstMovesDoNotScheduleDuplicateRevalidation() {
+        try (var scheduler = mockStatic(Scheduler.class); var bukkit = mockStatic(Bukkit.class)) {
+            var listener = listener();
+            Material[] materials = {Material.IRON_BOOTS, Material.IRON_LEGGINGS, Material.ELYTRA,
+                    Material.IRON_HELMET, Material.SHIELD, Material.TOTEM_OF_UNDYING, Material.DIAMOND_PICKAXE};
+            int[] destinations = {36, 37, 38, 39, 40, 40, 9};
+            int[] raw = {8, 7, 6, 5, 45, 45, 9};
+            for (int i = 0; i < materials.length; i++) {
+                ItemStack stack = item(materials[i]);
+                physical[0] = stack;
+                listener.onSlotChange(event(0, 36, null));
+                physical[0] = null; physical[destinations[i]] = stack;
+                listener.onSlotChange(event(destinations[i], raw[i], null));
+                assertEquals(destinations[i], ((HolderRef.PlayerHolder) store.getCanonical(id).orElseThrow().holder()).slot());
+                listener.onSlotChange(event(0, 36, stack));
+                physical[destinations[i]] = null;
+                listener.onSlotChange(event(destinations[i], raw[i], stack));
+            }
+            verify(detector, never()).handlePlayerInventoryConflict(any(), anyInt(), any(), any(), any(), any());
+            verify(inventory, never()).getContents();
+        }
+    }
+
+    @Test void changedViewRejectsOutOfBoundsRawSlotWithoutReadingIt() {
+        try (var scheduler = mockStatic(Scheduler.class); var bukkit = mockStatic(Bukkit.class)) {
+            var listener = listener();
+            when(view.countSlots()).thenReturn(20);
+            listener.onSlotChange(event(0, 36, null));
+            listener.onSlotChange(event(0, -1, null));
+            verify(view, never()).getInventory(anyInt());
+            verifyNoInteractions(migration, identities, detector);
+        }
+    }
+
     @Test void ordinaryStackableChangesDoNotReadPdcOrScheduleWork() {
         try (var scheduler = mockStatic(Scheduler.class); var bukkit = mockStatic(Bukkit.class)) {
             var listener = listener();
@@ -156,6 +190,7 @@ class SlotObservationTest {
         when(player.getInventory()).thenReturn(inventory);
         when(player.getEnderChest()).thenReturn(ender);
         when(player.getOpenInventory()).thenReturn(view);
+        when(view.countSlots()).thenReturn(46);
         when(view.getInventory(anyInt())).thenReturn(inventory);
         when(inventory.getSize()).thenReturn(41);
         when(inventory.getContents()).thenAnswer(c -> physical.clone());

@@ -106,8 +106,11 @@ public final class IdentityPlayerInventoryListener implements Listener {
         try {
             Player player = event.getPlayer();
             int slot = event.getSlot();
+            var view = player.getOpenInventory();
+            int rawSlot = event.getRawSlot();
             if (slot < 0 || slot >= player.getInventory().getSize()
-                    || event.getPlayer().getOpenInventory().getInventory(event.getRawSlot()) != player.getInventory()) return;
+                    || rawSlot < 0 || rawSlot >= view.countSlots()
+                    || view.getInventory(rawSlot) != player.getInventory()) return;
             ItemStack previous = event.getOldItemStack();
             ItemStack live = player.getInventory().getItem(slot);
             if (!TrackabilityPolicy.isCandidate(previous) && !TrackabilityPolicy.isCandidate(live)) {
@@ -281,6 +284,15 @@ public final class IdentityPlayerInventoryListener implements Listener {
             return identity;
         }
         PresenceRecord scanDuplicate = seenThisScan.get(identity.id());
+        // Slot notifications may arrive destination-first; the cache is only a hint.
+        if (scanDuplicate != null && scanDuplicate.holder() instanceof HolderRef.PlayerHolder cached
+                && cached.playerId().equals(player.getUniqueId()) && cached.slot() != null
+                && (cached.slot() < 0 || cached.slot() >= player.getInventory().getSize()
+                    || !hasIdentity(player.getInventory().getItem(cached.slot()), identity))) {
+            slotCache.get(player.getUniqueId()).remove(cached.slot());
+            seenThisScan.remove(identity.id());
+            scanDuplicate = null;
+        }
         if (scanDuplicate != null && conflictDetector != null
                 && !scanDuplicate.holder().describe().equals(holder.describe())) {
             conflictDetector.handlePlayerInventoryConflict(player, slot, stack, identity, scanDuplicate, candidate);

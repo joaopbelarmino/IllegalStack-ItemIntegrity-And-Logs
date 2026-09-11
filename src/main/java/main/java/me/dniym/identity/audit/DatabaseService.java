@@ -903,7 +903,9 @@ public final class DatabaseService {
                          "INSERT INTO integrity_cases (case_id, created_at, mode, decision, action, confidence, reason, item_uuid, material, "
                                  + "canonical_summary, conflicting_summary, conflicting_item_summary, conflicting_item_snapshot, incident_key) "
                                  + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                                 + "ON CONFLICT(case_id) DO NOTHING");
+                                 + "ON CONFLICT(case_id) DO UPDATE SET action=excluded.action "
+                                 + "WHERE integrity_cases.action='DELETE_PENDING' "
+                                 + "AND excluded.action IN ('REMOVED','DELETE_ABORTED_REVALIDATION_FAILED','DELETE_ABORTED_PERSISTENCE_FAILED')");
                  PreparedStatement upsertCaseRollup = connection.prepareStatement(
                          "INSERT INTO integrity_case_rollups (incident_key, first_case_id, last_case_id, first_seen, last_seen, "
                                  + "occurrence_count, mode, decision, action, confidence, reason, item_uuid, material, canonical_summary, "
@@ -1085,6 +1087,7 @@ public final class DatabaseService {
 
     private boolean isDetailedCase(IntegrityCaseSnapshot snapshot) {
         return "CONFIRMED_DUPLICATE".equals(snapshot.decision())
+                || "DELETE_PENDING".equals(snapshot.action())
                 || "WOULD_REMOVE".equals(snapshot.action())
                 || "RESURRECTED_ITEM".equals(snapshot.decision())
                 || "REMOVED".equals(snapshot.action())

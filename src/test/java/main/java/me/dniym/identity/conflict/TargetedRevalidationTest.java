@@ -167,6 +167,7 @@ class TargetedRevalidationTest {
                 verify(db).writeAndConfirm(saved.capture());
                 var snapshot = ((main.java.me.dniym.identity.audit.AuditTask.PersistCase) saved.getValue()).snapshot();
                 assertNotNull(snapshot.conflictingItemSnapshot());
+                assertEquals("DELETE_PENDING", snapshot.action());
                 verify(owner.getEnderChest(), never()).setItem(anyInt(), any());
                 assertTrue(jobs.isEmpty());
                 // The canonical can disappear while the async commit is pending.
@@ -175,6 +176,10 @@ class TargetedRevalidationTest {
                 if (commitSucceeds) {
                     assertEquals(1, jobs.size());
                     jobs.remove().run();
+                    verify(db, times(2)).writeAndConfirm(saved.capture());
+                    var completed = ((main.java.me.dniym.identity.audit.AuditTask.PersistCase) saved.getValue()).snapshot();
+                    assertEquals(snapshot.caseId(), completed.caseId());
+                    assertEquals("DELETE_ABORTED_REVALIDATION_FAILED", completed.action());
                 } else assertTrue(jobs.isEmpty());
                 verify(owner.getEnderChest(), never()).setItem(anyInt(), any());
             }

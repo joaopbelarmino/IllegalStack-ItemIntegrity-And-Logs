@@ -79,7 +79,7 @@ public final class ItemIntegritySystem {
         this.databaseService = db;
         store = new main.java.me.dniym.identity.presence.DestinationTrackingStore(store,
                 new main.java.me.dniym.identity.presence.DestinationWindow(config.revalidationPendingLimit(),
-                        config.revalidationDestinationLimit(), 30_000, System::currentTimeMillis));
+                        config.revalidationDestinationLimit(), main.java.me.dniym.identity.presence.DestinationWindow.DEFAULT_TTL_MS, System::currentTimeMillis));
         this.presenceStore = store;
         VirtualCustodyService virtualCustodyService = new VirtualCustodyService(identityService, presenceStore);
         this.webhookNotifier = new DiscordWebhookNotifier(config);
