@@ -49,6 +49,8 @@ public final class IdentityPlayerInventoryListener implements Listener {
     private final ItemIntegrityConfig config;
     private final VirtualCustodyService virtualCustodyService;
     private final Map<java.util.UUID, Map<String, ItemIdentity>> lastSeenByPlayer = new ConcurrentHashMap<>();
+    private final Map<java.util.UUID, PendingPlayerScan> pendingScans = new ConcurrentHashMap<>();
+    private final Map<ExternalCheckKey, Map<String, ItemIdentity>> pendingExternalChecks = new ConcurrentHashMap<>();
     private final AtomicInteger suppressedDivergentWarnings = new AtomicInteger();
     private int nextPlayerIndex;
     private long lastStatsLogMs;
@@ -78,6 +80,9 @@ public final class IdentityPlayerInventoryListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onQuit(PlayerQuitEvent event) {
+        java.util.UUID id = event.getPlayer().getUniqueId();
+        pendingScans.remove(id);
+        pendingExternalChecks.keySet().removeIf(key -> key.playerId().equals(id));
         scanPlayer(event.getPlayer(), PresenceState.OFFLINE_COMMITTED);
     }
 
@@ -112,10 +117,18 @@ public final class IdentityPlayerInventoryListener implements Listener {
         if (player == null) {
             return;
         }
-        if (IllegalStack.isFoliaServer()) {
-            player.getScheduler().run(plugin, task -> scanPlayer(player, state), null);
-        } else {
-            Bukkit.getScheduler().runTask(plugin, () -> scanPlayer(player, state));
+        java.util.UUID id = player.getUniqueId();
+        PendingPlayerScan pending = new PendingPlayerScan(state);
+        if (pendingScans.putIfAbsent(id, pending) != null) return;
+        try {
+            Scheduler.runTaskLater(plugin, () -> {
+                if (pendingScans.remove(id, pending) && player.isOnline()) {
+                    scanPlayer(player, pending.state());
+                }
+            }, 1, player);
+        } catch (RuntimeException error) {
+            pendingScans.remove(id, pending);
+            throw error;
         }
     }
 
@@ -200,14 +213,27 @@ public final class IdentityPlayerInventoryListener implements Listener {
 
     public void scheduleExternalCustodyCheck(Player player, ItemIdentity identity) {
         java.util.UUID playerId = player.getUniqueId();
-        String playerName = player.getName();
-        Scheduler.runTaskLater(plugin, () -> {
-            Player current = Bukkit.getPlayer(playerId);
-            if (current == null || !current.isOnline()) {
-                return;
-            }
-            virtualCustodyService.tryCommitMissingPlayerItemToExternal(identity, playerId, playerName);
-        }, config.externalCustodyMissingConfirmDelayTicks(), player);
+        long delay = config.externalCustodyMissingConfirmDelayTicks();
+        // A batch is tick-scoped: later observations never get a shorter confirmation delay.
+        ExternalCheckKey key = new ExternalCheckKey(playerId, Bukkit.getCurrentTick(), delay);
+        Map<String, ItemIdentity> batch = pendingExternalChecks.get(key);
+        if (batch != null) {
+            batch.putIfAbsent(identity.id(), identity);
+            return;
+        }
+        batch = new HashMap<>();
+        batch.put(identity.id(), identity);
+        pendingExternalChecks.put(key, batch);
+        Map<String, ItemIdentity> scheduledBatch = batch;
+        try {
+            Scheduler.runTaskLater(plugin, () -> {
+                if (!pendingExternalChecks.remove(key, scheduledBatch) || !player.isOnline()) return;
+                virtualCustodyService.tryCommitMissingPlayerItemsToExternal(scheduledBatch.values(), player);
+            }, delay, player);
+        } catch (RuntimeException error) {
+            pendingExternalChecks.remove(key, scheduledBatch);
+            throw error;
+        }
     }
 
     private void maybeLogDivergentObservation(ItemIdentity identity, PresenceObservation observation, HolderRef holder) {
@@ -231,9 +257,12 @@ public final class IdentityPlayerInventoryListener implements Listener {
         if (player == null) {
             return 0;
         }
-        int contents = player.getInventory().getContents().length;
+        int contents = player.getInventory().getSize();
         return contents > 40 ? contents : contents + 1;
     }
+
+    private record PendingPlayerScan(PresenceState state) {}
+    private record ExternalCheckKey(java.util.UUID playerId, int tick, long delay) {}
 
     private void maybeLogScannerStats(int playersProcessed, int itemsProcessed, int backlog, long elapsedNanos) {
         long interval = config.scannerStatsLogIntervalMs();
