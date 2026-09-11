@@ -42,7 +42,7 @@ public final class TrackabilityPolicy {
         return isCandidate(stack) && !isExempt(stack);
     }
 
-    static boolean isCandidate(ItemStack stack) {
+    public static boolean isCandidate(ItemStack stack) {
         if (stack == null) {
             return false;
         }

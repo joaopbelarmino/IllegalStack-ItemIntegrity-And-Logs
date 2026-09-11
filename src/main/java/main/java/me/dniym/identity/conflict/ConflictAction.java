@@ -2,6 +2,7 @@ package main.java.me.dniym.identity.conflict;
 
 public enum ConflictAction {
     WOULD_REMOVE,
+    DELETE_PENDING,
     REMOVED,
     DELETE_ABORTED_REVALIDATION_FAILED,
     DELETE_ABORTED_PERSISTENCE_FAILED,
