@@ -1,4 +1,4 @@
-# IllegalStack ItemIntegraty And Logs By ZetraMC
+# IllegalStack ItemIntegrity And Logs
 
 Private ZetraMC fork targeting Minecraft/Leaf 1.21.11 and Java 21.
 The current baseline is version 3.0 without stackable-item UUID tracking or
@@ -7,7 +7,7 @@ and asynchronous SQLite audit remain available.
 
 ## Repository workflow
 
-Canonical private repository: [IllegalStack ItemIntegraty And Logs By ZetraMC](https://github.com/joaopbelarmino/IllegalStack-ItemIntegraty-And-Logs-By-ZetraMC).
+Canonical private repository: [IllegalStack ItemIntegrity And Logs](https://github.com/joaopbelarmino/IllegalStack-ItemIntegrity-And-Logs).
 
 This repository is the primary source of truth. Keep it private. `main` is the
 stable branch; use separate branches for larger changes and merge only after
