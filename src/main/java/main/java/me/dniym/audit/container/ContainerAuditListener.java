@@ -70,14 +70,14 @@ public final class ContainerAuditListener implements Listener {
     @EventHandler(priority=EventPriority.MONITOR)
     public void entitiesLoad(EntitiesLoadEvent event){
         if(!config.indexChunkLoad()||!config.containersEnabled())return;
-        for(var entity:event.getEntities())if(entity instanceof InventoryHolder h)dirty.mark(h.getInventory(),AuditCause.UNKNOWN,null,false);
+        for(var entity:event.getEntities())if(entity instanceof InventoryHolder h)dirty.discover(h.getInventory());
     }
     @EventHandler(priority=EventPriority.MONITOR)
     public void chunkLoad(ChunkLoadEvent event){
         if(!config.indexChunkLoad()||!config.containersEnabled())return;
         int seen=0;
         for(BlockState state:event.getChunk().getTileEntities(false)){
-            if(state instanceof InventoryHolder holder){dirty.mark(holder.getInventory(),AuditCause.UNKNOWN,null,false);if(++seen>=128)break;}
+            if(state instanceof InventoryHolder holder){dirty.discover(holder.getInventory());if(++seen>=128)break;}
         }
 
     }

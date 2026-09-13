@@ -33,12 +33,12 @@ public final class AuditGui implements Listener {
     public AuditGui(AuditModule module){this.module=module;}
 
     public void openContainer(Player viewer,AuditDatabase.StoredContainer stored,ItemStack[] items){
-        boolean readOnly=!"ACTIVE".equals(stored.status());
+        boolean readOnly=!"ACTIVE".equals(stored.status())||!module.config().removalEnabled();
         Session s=new Session(Target.CONTAINER,stored.ref().uuid(),stored.ref().type(),false,stored.hash(),cloneItems(items),stored,null,readOnly);
-        s.topology=module.dirty().topologyRevision();open(viewer,s);
+        s.topology=module.dirty().topologyRevision(stored.ref());open(viewer,s);
     }
     public void openPlayer(Player viewer,UUID owner,String name,boolean ender,ItemStack[] items,String state,long modified){
-        String hash=SnapshotCodec.hash(SnapshotCodec.serialize(items));Session s=new Session(ender?Target.PLAYER_ENDER:Target.PLAYER_INV,owner,name,ender,hash,cloneItems(items),null,null,false);open(viewer,s);
+        String hash=SnapshotCodec.hash(SnapshotCodec.serialize(items));Session s=new Session(ender?Target.PLAYER_ENDER:Target.PLAYER_INV,owner,name,ender,hash,cloneItems(items),null,null,!module.config().removalEnabled());open(viewer,s);
     }
     public void openOfflinePlayer(Player viewer,UUID owner,boolean ender,List<PlayerDataReader.RawSlot> raw,int version,String hash,long modified){
         ItemStack[] items=new ItemStack[ender?27:41];
@@ -90,7 +90,7 @@ public final class AuditGui implements Listener {
     }
     private void transfer(Player player,Session s){
         if(s.submitted)return;s.submitted=true;
-        if(s.target==Target.CONTAINER&&s.topology!=module.dirty().topologyRevision()){AuditModule.message(player,"Container mudou; reabra a interface.");player.closeInventory();return;}
+        if(s.target==Target.CONTAINER&&s.topology!=module.dirty().topologyRevision(s.stored.ref())){AuditModule.message(player,"Container mudou; reabra a interface.");player.closeInventory();return;}
         if(s.target==Target.CONTAINER)module.transferContainer(player,s.stored,s.items,Set.copyOf(s.selected));
         else module.transferOnlinePlayer(player,s.id,s.ender,s.hash,s.items,Set.copyOf(s.selected));
         player.closeInventory();

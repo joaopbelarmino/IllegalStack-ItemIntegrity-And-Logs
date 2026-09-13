@@ -56,6 +56,7 @@ public final class AuditConfig {
         y.addDefault("audit.gui.allow-item-removal", true);
         y.addDefault("audit.gui.require-confirmation", true);
         y.addDefault("audit.backup.retention-days", 7);
+        y.addDefault("audit.evidence.retention-days", 7);
         y.addDefault("audit.backup.manual-retention-days", 0);
         y.addDefault("audit.suspicious.enabled", true);
         y.addDefault("audit.suspicious.minimum-score", 30);
@@ -88,9 +89,11 @@ public final class AuditConfig {
     public int destroyedRetentionDays() { return Math.max(1, yaml.getInt("audit.containers.destroyed-retention-days", 30)); }
     public int dbQueueCapacity() { return Math.max(100, yaml.getInt("audit.database.queue-capacity", 10000)); }
     public File databaseFile() { return new File(plugin.getDataFolder(), yaml.getString("audit.database.file", "item-audit.db")); }
-    public boolean removalEnabled() { return yaml.getBoolean("audit.gui.allow-item-removal", true); }
+    // Re-enable only with a tested recovery protocol spanning playerdata and chunk persistence.
+    public boolean removalEnabled() { return false; }
     public boolean confirmationRequired() { return yaml.getBoolean("audit.gui.require-confirmation", true); }
     public int backupRetentionDays() { return Math.max(1, yaml.getInt("audit.backup.retention-days", 7)); }
+    public int evidenceRetentionDays(){return Math.max(1,yaml.getInt("audit.evidence.retention-days",7));}
     public int manualBackupRetentionDays() { return Math.max(0, yaml.getInt("audit.backup.manual-retention-days", 0)); }
     public boolean suspiciousEnabled() { return yaml.getBoolean("audit.suspicious.enabled", true); }
     public int minimumScore() { return Math.max(0, yaml.getInt("audit.suspicious.minimum-score", 30)); }
