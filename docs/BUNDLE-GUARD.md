@@ -1,7 +1,7 @@
 # BundleGuard: alterações sobre o IllegalStack original (GPLv3)
 
 Base: HEAD do repositório oficial na data desta modificação (versão 2.9.12a,
-mesma do jar que você já usa no ZetraMC).
+mesma do jar que você já usa no servidor).
 
 - `src/main/java/main/java/me/dniym/checks/UniqueItemLedger.java` (novo)
   Registro central de "onde cada UUID de item foi visto por último". Antes
@@ -209,7 +209,7 @@ DETECT→SNAPSHOT→PERSIST→CONFIRM→DELETE que vocês definiram.
 - **Issue #204** — `FishAttempt.isBlackListedSpot` quebra com
   `IllegalArgumentException: World unloaded` em servidores que criam/deletam
   mundos dinamicamente (ex: mundos de evento temporários). Só relevante se
-  o ZetraMC fizer isso. Me avise se for o caso que eu aplico o patch.
+  o servidor fizer isso. Me avise se for o caso que eu aplico o patch.
 - **Issue #201** — erro de acesso assíncrono a entidades com ProtocolLib
   instalado. Reportado sem stack trace legível publicamente, só um
   screenshot que não consigo acessar — não há informação suficiente pra

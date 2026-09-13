@@ -1,6 +1,6 @@
 ---
 name: Sugerir melhoria
-about: Proponha uma melhoria para a fork ZetraMC
+about: Proponha uma melhoria para a fork
 title: ''
 assignees: ''
 ---

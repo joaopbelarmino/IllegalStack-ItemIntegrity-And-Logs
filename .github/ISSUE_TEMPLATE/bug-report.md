@@ -1,6 +1,6 @@
 ---
 name: Relatar bug ou falso positivo
-about: Ajude a reproduzir um problema nesta fork do ZetraMC
+about: Ajude a reproduzir um problema nesta fork
 title: ''
 labels: ''
 assignees: ''
@@ -31,4 +31,3 @@ Inclua apenas o trecho necessário do log. Para desempenho, inclua perfil Spark 
 - [ ] Identifiquei o commit, não apenas a versão 3.0.
 - [ ] Removi dados sensíveis.
 - [ ] Informei quais etapas consegui reproduzir em ambiente de teste.
-

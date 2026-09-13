@@ -1,14 +1,14 @@
 # IllegalStack ItemIntegrity And Logs
-### ZetraMC · Identidade de itens, evidências e investigação de duplicações
+### Identidade de itens, evidências e investigação de duplicações
 
 **Arquitetura e direção da fork por jaozinm, com programação assistida por IA.**
 Construído sobre o trabalho dos autores e colaboradores do [IllegalStack original](https://github.com/dniym/IllegalStack).
 
-[Como funciona](docs/ARQUITETURA.md) · [Instalação e testes](docs/OPERACAO.md) · [Estado das versões](docs/STATUS.md) · [Contribuir](CONTRIBUTING.md) · [Segurança](SECURITY.md)
+[Comandos](docs/COMANDOS.md) · [Como funciona](docs/ARQUITETURA.md) · [Instalação e testes](docs/OPERACAO.md) · [Estado das versões](docs/STATUS.md) · [Contribuir](CONTRIBUTING.md) · [Segurança](SECURITY.md)
 
 ## Por que compartilhar este projeto?
 
-Depois de anos usando plugins gratuitos e aprendendo com o trabalho de outras pessoas na comunidade Minecraft, quis devolver um pouco dessa ajuda. Esta fork nasceu de problemas reais enfrentados na administração do ZetraMC e da vontade de construir uma ferramenta útil para outros servidores.
+Depois de anos usando plugins gratuitos e aprendendo com o trabalho de outras pessoas na comunidade Minecraft, quis devolver um pouco dessa ajuda. Esta fork nasceu de problemas reais enfrentados na administração de servidores e da vontade de construir uma ferramenta útil para outros servidores.
 
 A proposta de abrir o código é permitir que mais pessoas entendam as decisões, revisem os riscos, reproduzam problemas e contribuam com melhorias. Não é uma promessa de proteção perfeita: é um projeto que deve evoluir com transparência, testes e responsabilidade.
 
@@ -57,7 +57,7 @@ MONITOR não desativa as proteções tradicionais do IllegalStack. A migração 
 
 | Ambiente | Situação |
 | --- | --- |
-| **LeafMC 1.21.11 + Java 21** | Alvo de desenvolvimento; uso e testes de lifecycle relatados por jaozinm no servidor ZetraMC. |
+| **LeafMC 1.21.11 + Java 21** | Alvo de desenvolvimento; uso e testes de lifecycle relatados por jaozinm no servidor do mantenedor. |
 | Paper e outras forks | Sem garantia de estabilidade ou cobertura equivalente. |
 | Minecraft 1.21.4 a 1.21.11 | Outras versões dessa faixa podem compartilhar comportamentos, mas **a compatibilidade desta build não foi validada**. APIs específicas podem impedir funcionamento ou carregamento. |
 | Folia | Não considere a fork inteira validada apenas pela declaração herdada em `plugin.yml`; a auditoria beta não é habilitada nesse ambiente. |
@@ -105,7 +105,7 @@ Inspeção exige `illegalstack.itemintegrity.inspect`, além da permissão de ac
 bash ./gradlew clean build --no-daemon
 ```
 
-Artefato instalável: `build/libs/Illegalstack-zetramc-3.0.jar`.
+Artefato instalável: `build/libs/IllegalStack-ItemIntegrity-And-Logs-3.0.jar`.
 Não confunda com o JAR simples sem dependências. Prefira compilar o código ou usar artefatos oficiais deste repositório; não instale arquivos enviados por desconhecidos.
 
 ## Performance e limites
@@ -116,7 +116,7 @@ Isso **não significa custo zero**. Inventários complexos, serialização, plug
 
 ## Créditos e licença
 
-- **jaozinm / ZetraMC:** arquitetura da fork, direção do projeto, requisitos e testes relatados em servidor.
+- **jaozinm:** arquitetura da fork, direção do projeto, requisitos e testes relatados em servidor.
 - **Programação assistida por IA:** apoio à implementação, análise e revisão, com limitações explicitamente documentadas.
 - **dNiym, Loving11ish e colaboradores:** base IllegalStack e seu histórico de desenvolvimento.
 - **Comunidade:** ferramentas, relatos, revisões e projetos que ajudam a melhorar o ecossistema.

@@ -18,10 +18,6 @@ repositories {
         url = uri("https://repo.papermc.io/repository/maven-public/")
     }
     maven {
-        name = "PaperMC"
-        url = uri("https://repo.papermc.io/repository/maven-public/")
-    }
-    maven {
         name = "ProtocolLib"
         url = uri("https://repo.dmulloy2.net/nexus/repository/public/")
     }
@@ -74,7 +70,7 @@ tasks.test {
 }
 
 tasks.shadowJar {
-    archiveBaseName.set("Illegalstack-zetramc")
+    archiveBaseName.set("IllegalStack-ItemIntegrity-And-Logs")
     archiveClassifier.set("")
     mergeServiceFiles()
     // Nao precisamos de mais nada de sqlite-jdbc alem da classe JDBC em si -

@@ -130,7 +130,7 @@ public final class DiscordWebhookNotifier {
                 ? "Duplicacao confirmada"
                 : "Possivel conflito de integridade";
         return """
-                {"username":"Zetra Item Integrity","embeds":[{"title":"%s","color":%d,"description":"%s","footer":{"text":"Logs: item-integrity-cases.log, item-integrity-possible-cases.log e SQLite"},"timestamp":"%s"}]}
+                {"username":"Item Integrity","embeds":[{"title":"%s","color":%d,"description":"%s","footer":{"text":"Logs: item-integrity-cases.log, item-integrity-possible-cases.log e SQLite"},"timestamp":"%s"}]}
                 """.formatted(escapeJson(title), color, escapeJson(description), Instant.now());
     }
 

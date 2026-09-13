@@ -1,6 +1,6 @@
 # Autoria e dependências
 
-## Fork ZetraMC
+## Fork ItemIntegrity And Logs
 Arquitetura e direção por **jaozinm**, com programação assistida por IA. Esta atribuição se refere às mudanças e decisões da fork, não à autoria integral do IllegalStack ou de bibliotecas utilizadas.
 
 ## Projeto original
