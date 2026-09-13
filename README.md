@@ -1,5 +1,6 @@
 # IllegalStack ItemIntegrity And Logs
-### ZetraMC · Identidade de itens, evidências e investigação de duplicações
+
+### Identidade de itens, evidências e investigação de duplicações
 
 **Arquitetura e direção da fork por jaozinm, com programação assistida por IA.**
 Construído sobre o trabalho dos autores e colaboradores do [IllegalStack original](https://github.com/dniym/IllegalStack).
@@ -8,19 +9,19 @@ Construído sobre o trabalho dos autores e colaboradores do [IllegalStack origin
 
 ## Por que compartilhar este projeto?
 
-Depois de anos usando plugins gratuitos e aprendendo com o trabalho de outras pessoas na comunidade Minecraft, quis devolver um pouco dessa ajuda. Esta fork nasceu de problemas reais enfrentados na administração do ZetraMC e da vontade de construir uma ferramenta útil para outros servidores.
+Depois de anos usando plugins gratuitos e aprendendo com o trabalho de outras pessoas na comunidade Minecraft, quis devolver um pouco dessa ajuda. Esta fork nasceu de problemas reais enfrentados na administração de servidores Minecraft e da vontade de construir uma ferramenta útil para outros servidores.
 
 A proposta de abrir o código é permitir que mais pessoas entendam as decisões, revisem os riscos, reproduzam problemas e contribuam com melhorias. Não é uma promessa de proteção perfeita: é um projeto que deve evoluir com transparência, testes e responsabilidade.
 
-A assistência de IA faz parte do processo de programação e revisão. A definição dos objetivos, as decisões de arquitetura e os testes relatados no servidor são conduzidos por jaozinm. Isso não substitui revisão humana, nem transfere a autoria do IllegalStack original para esta fork.
+A assistência de IA faz parte do processo de programação e revisão. A definição dos objetivos, as decisões de arquitetura e os testes relatados são conduzidos por jaozinm. Isso não substitui revisão humana, nem transfere a autoria do IllegalStack original para esta fork.
 
 ## O que existe aqui?
 
-| Camada | Responsabilidade |
-| --- | --- |
-| Proteções do IllegalStack | Verificações e bloqueios herdados do projeto original, controlados por sua própria configuração. |
-| Item Integrity | Identidade persistente, rastreamento de custódia, revalidação de conflitos e registro de evidências. |
-| Auditoria de inventários | Busca e consulta de playerdata e containers. **Beta em branch separada**, ainda não integrada à `main`. |
+| Camada                    | Responsabilidade                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Proteções do IllegalStack | Verificações e bloqueios herdados do projeto original, controlados por sua própria configuração.        |
+| Item Integrity            | Identidade persistente, rastreamento de custódia, revalidação de conflitos e registro de evidências.    |
+| Auditoria de inventários  | Busca e consulta de playerdata e containers. **Beta em branch separada**, ainda não integrada à `main`. |
 
 > **Leia antes de instalar:** a `main` é a base 3.0 sem rastreamento de empilháveis. Correções mais recentes e auditoria estão em branches de desenvolvimento. O número “3.0” sozinho não identifica todas as diferenças: registre também o commit utilizado. Veja o [estado exato das branches](docs/STATUS.md).
 
@@ -45,9 +46,9 @@ Muitos processos de duplicação copiam os dados do item junto com ele. Se duas 
 
 ## MONITOR, DELETE e segurança
 
-- **MONITOR:** registra e comunica os conflitos avaliados pelo Item Integrity, sem executar a remoção desse detector.
-- **DELETE:** permite ação destrutiva apenas nos caminhos habilitados e sujeitos às verificações da implementação. Exige validação específica no servidor antes de uso.
-- **FAIL_OPEN:** diante de incerteza ou falha na persistência/revalidação, a prioridade é não apagar um item legítimo.
+* **MONITOR:** registra e comunica os conflitos avaliados pelo Item Integrity, sem executar a remoção desse detector.
+* **DELETE:** permite ação destrutiva apenas nos caminhos habilitados e sujeitos às verificações da implementação. Exige validação específica no servidor antes de uso.
+* **FAIL_OPEN:** diante de incerteza ou falha na persistência/revalidação, a prioridade é não apagar um item legítimo.
 
 **Recomendação para esta publicação: mantenha MONITOR.** Há correções relevantes de persistência dos resultados em branches posteriores à base da `main`.
 
@@ -55,12 +56,12 @@ MONITOR não desativa as proteções tradicionais do IllegalStack. A migração 
 
 ## Compatibilidade
 
-| Ambiente | Situação |
-| --- | --- |
-| **LeafMC 1.21.11 + Java 21** | Alvo de desenvolvimento; uso e testes de lifecycle relatados por jaozinm no servidor ZetraMC. |
-| Paper e outras forks | Sem garantia de estabilidade ou cobertura equivalente. |
-| Minecraft 1.21.4 a 1.21.11 | Outras versões dessa faixa podem compartilhar comportamentos, mas **a compatibilidade desta build não foi validada**. APIs específicas podem impedir funcionamento ou carregamento. |
-| Folia | Não considere a fork inteira validada apenas pela declaração herdada em `plugin.yml`; a auditoria beta não é habilitada nesse ambiente. |
+| Ambiente                     | Situação                                                                                                                                                                            |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **LeafMC 1.21.11 + Java 21** | Alvo principal de desenvolvimento e testes de lifecycle.                                                                                                                            |
+| Paper e outras forks         | Sem garantia de estabilidade ou cobertura equivalente.                                                                                                                              |
+| Minecraft 1.21.4 a 1.21.11   | Outras versões dessa faixa podem compartilhar comportamentos, mas **a compatibilidade desta build não foi validada**. APIs específicas podem impedir funcionamento ou carregamento. |
+| Folia                        | Não considere a fork inteira validada apenas pela declaração herdada em `plugin.yml`; a auditoria beta não é habilitada nesse ambiente.                                             |
 
 Os testes no Leaf não significam que toda branch nova já passou por testes em produção. Build e testes automatizados também não provam ausência de falsos positivos ou impacto em TPS.
 
@@ -72,26 +73,26 @@ Os testes no Leaf não significam que toda branch nova já passou por testes em 
 4. Revise as configurações geradas e comece pelo MONITOR.
 5. Reproduza transferências legítimas e duplicações controladas em servidor de teste.
 
-| Arquivo | Uso |
-| --- | --- |
-| `config.yml` | Proteções tradicionais do IllegalStack. |
-| `item-integrity.yml` | Identidade, detector, SQLite, limites e webhooks. |
-| `item-integrity.db` | Persistência do Item Integrity. Não edite como texto. |
-| `item-integrity-cases.log` | Casos classificados pelo detector. |
-| `item-integrity-possible-cases.log` | Observações e casos possíveis que exigem interpretação. |
-| `item-audit.yml` / `item-audit.db` | Módulo de auditoria, somente nas branches beta correspondentes. |
+| Arquivo                             | Uso                                                             |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `config.yml`                        | Proteções tradicionais do IllegalStack.                         |
+| `item-integrity.yml`                | Identidade, detector, SQLite, limites e webhooks.               |
+| `item-integrity.db`                 | Persistência do Item Integrity. Não edite como texto.           |
+| `item-integrity-cases.log`          | Casos classificados pelo detector.                              |
+| `item-integrity-possible-cases.log` | Observações e casos possíveis que exigem interpretação.         |
+| `item-audit.yml` / `item-audit.db`  | Módulo de auditoria, somente nas branches beta correspondentes. |
 
 Não há rastreamento de UUID para itens empilháveis nem rotina de limpeza desse antigo subsistema. Arquivos de configuração antigos não reativam código removido.
 
 ## Comandos úteis
 
-| Comando | Finalidade |
-| --- | --- |
-| `/istack inspect` | Inspecionar a identidade e a presença do item da mão principal. |
-| `/istack inspect block` | Consultar a identidade de um bloco rastreado, como shulker colocada. |
-| `/istack lookup <itemId>` | Consultar identidade, presença e observações disponíveis. |
-| `/istack metrics` | Consultar métricas disponíveis na build. |
-| `/istack restart sql` | Solicitar manutenção/compactação do SQLite; não é comando para apagar ou reiniciar IDs. |
+| Comando                   | Finalidade                                                                              |
+| ------------------------- | --------------------------------------------------------------------------------------- |
+| `/istack inspect`         | Inspecionar a identidade e a presença do item da mão principal.                         |
+| `/istack inspect block`   | Consultar a identidade de um bloco rastreado, como shulker colocada.                    |
+| `/istack lookup <itemId>` | Consultar identidade, presença e observações disponíveis.                               |
+| `/istack metrics`         | Consultar métricas disponíveis na build.                                                |
+| `/istack restart sql`     | Solicitar manutenção/compactação do SQLite; não é comando para apagar ou reiniciar IDs. |
 
 Inspeção exige `illegalstack.itemintegrity.inspect`, além da permissão de acesso ao comando quando aplicável. Comandos de auditoria, incluindo o alias `/stack`, pertencem às branches beta; consulte a documentação da branch escolhida.
 
@@ -105,7 +106,7 @@ Inspeção exige `illegalstack.itemintegrity.inspect`, além da permissão de ac
 bash ./gradlew clean build --no-daemon
 ```
 
-Artefato instalável: `build/libs/Illegalstack-zetramc-3.0.jar`.
+O artefato instalável é o **JAR sombreado** gerado em `build/libs/`.
 Não confunda com o JAR simples sem dependências. Prefira compilar o código ou usar artefatos oficiais deste repositório; não instale arquivos enviados por desconhecidos.
 
 ## Performance e limites
@@ -116,9 +117,9 @@ Isso **não significa custo zero**. Inventários complexos, serialização, plug
 
 ## Créditos e licença
 
-- **jaozinm / ZetraMC:** arquitetura da fork, direção do projeto, requisitos e testes relatados em servidor.
-- **Programação assistida por IA:** apoio à implementação, análise e revisão, com limitações explicitamente documentadas.
-- **dNiym, Loving11ish e colaboradores:** base IllegalStack e seu histórico de desenvolvimento.
-- **Comunidade:** ferramentas, relatos, revisões e projetos que ajudam a melhorar o ecossistema.
+* **jaozinm:** arquitetura da fork, direção do projeto, requisitos e testes.
+* **Programação assistida por IA:** apoio à implementação, análise e revisão, com limitações explicitamente documentadas.
+* **dNiym, Loving11ish e colaboradores:** base IllegalStack e seu histórico de desenvolvimento.
+* **Comunidade:** ferramentas, relatos, revisões e projetos que ajudam a melhorar o ecossistema.
 
 A [GNU GPL v3 presente no repositório](LICENSE) e os créditos originais são preservados. Dependências mantêm suas próprias licenças; veja [as atribuições](docs/ATRIBUICOES.md). Esta fork não é uma versão oficial do projeto original e não oferece garantia de proteção absoluta.
