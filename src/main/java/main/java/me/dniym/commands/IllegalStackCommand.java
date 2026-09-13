@@ -29,6 +29,9 @@ public class IllegalStackCommand implements CommandExecutor, TabCompleter {
         if (ItemIntegrityInspectCommand.handle(sender, args)) {
             return true;
         }
+        if (AuditCommand.handle(sender, args)) {
+            return true;
+        }
 
         if (args.length == 1) {
             if (args[0].equalsIgnoreCase("reload")) {
@@ -391,6 +394,11 @@ public class IllegalStackCommand implements CommandExecutor, TabCompleter {
         arguments.add("metrics");
         arguments.add("lookup");
         arguments.add("restart");
+        arguments.add("search");
+        arguments.add("view");
+        arguments.add("reindex");
+        arguments.add("audit");
+        arguments.add("backup");
 
         List<String> result = new ArrayList<>();
         if (args.length == 1){
@@ -409,6 +417,8 @@ public class IllegalStackCommand implements CommandExecutor, TabCompleter {
             result.add("sql");
             return result;
         }
+        List<String> audit = AuditCommand.complete(sender, args);
+        if (audit != null) return audit;
         return null;
     }
 
