@@ -11,7 +11,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.*;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.inventory.*;
-import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.event.world.*;
 import org.bukkit.event.vehicle.VehicleDestroyEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
@@ -59,20 +59,35 @@ public final class ContainerAuditListener implements Listener {
     public void vehicleDestroy(VehicleDestroyEvent event){
         if(event.getVehicle() instanceof InventoryHolder holder)dirty.destroy(holder.getInventory(),AuditCause.VEHICLE_DESTROY,event.getAttacker() instanceof Player p?p:null);
     }
+    @EventHandler(priority=EventPriority.MONITOR,ignoreCancelled=true)
+    public void place(BlockPlaceEvent event){
+        if(event.getBlock().getState(false) instanceof InventoryHolder)dirty.refreshChestTopology(event.getBlock());
+    }
+    @EventHandler(priority=EventPriority.MONITOR,ignoreCancelled=true)
+    public void unload(ChunkUnloadEvent event){dirty.unload(event.getChunk());}
+    @EventHandler(priority=EventPriority.MONITOR)
+    public void entitiesUnload(EntitiesUnloadEvent event){dirty.unloadEntities(event.getEntities());}
+    @EventHandler(priority=EventPriority.MONITOR)
+    public void entitiesLoad(EntitiesLoadEvent event){
+        if(!config.indexChunkLoad()||!config.containersEnabled())return;
+        for(var entity:event.getEntities())if(entity instanceof InventoryHolder h)dirty.mark(h.getInventory(),AuditCause.UNKNOWN,null,false);
+    }
     @EventHandler(priority=EventPriority.MONITOR)
     public void chunkLoad(ChunkLoadEvent event){
-        if(!config.indexChunkLoad())return;
+        if(!config.indexChunkLoad()||!config.containersEnabled())return;
         int seen=0;
-        for(BlockState state:event.getChunk().getTileEntities()){
+        for(BlockState state:event.getChunk().getTileEntities(false)){
             if(state instanceof InventoryHolder holder){dirty.mark(holder.getInventory(),AuditCause.UNKNOWN,null,false);if(++seen>=128)break;}
         }
-        if(seen<128)for(var entity:event.getChunk().getEntities())if(entity instanceof InventoryHolder holder){dirty.mark(holder.getInventory(),AuditCause.UNKNOWN,null,false);if(++seen>=128)break;}
+
     }
     @EventHandler(priority=EventPriority.MONITOR)
     public void itemTransportTarget(ItemTransportingEntityValidateTargetEvent event){
+        if(!config.containersEnabled())return;
         long now=System.currentTimeMillis();String key=event.getEntity().getUniqueId()+":"+event.getBlock().getWorld().getUID()+":"+event.getBlock().getX()+":"+event.getBlock().getY()+":"+event.getBlock().getZ();
-        Long previous=transportingThrottle.put(key,now);if(previous!=null&&now-previous<1000)return;
-        if(transportingThrottle.size()>2048)transportingThrottle.entrySet().removeIf(e->now-e.getValue()>30_000);
+        Long previous=transportingThrottle.get(key);if(previous!=null&&now-previous<1000)return;
+        transportingThrottle.put(key,now);
+        if(transportingThrottle.size()>2048){var it=transportingThrottle.keySet().iterator();it.next();it.remove();}
         dirty.mark(event.getBlock(),AuditCause.COPPER_GOLEM,null,false);
     }
 }

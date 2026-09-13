@@ -22,7 +22,8 @@ class PlayerDataReaderTest {
         CompoundTag entry=new CompoundTag();entry.putByte("slot",(byte)0);entry.put("item",item("minecraft:netherite_block",64));container.add(entry);
         components.put("minecraft:container",container);shulker.put("components",components);inventory.add(shulker);root.put("Inventory",inventory);
         ListTag<CompoundTag> ender=new ListTag<>(CompoundTag.class);CompoundTag sponge=item("minecraft:sponge",12);sponge.putByte("Slot",(byte)2);ender.add(sponge);root.put("EnderItems",ender);
-        Path file=temp.resolve(UUID.randomUUID()+".dat");NBTUtil.write(root,file.toFile());
+        Path file=temp.resolve(UUID.randomUUID()+".dat");try(var gzip=new java.util.zip.GZIPOutputStream(java.nio.file.Files.newOutputStream(file));
+            var out=new net.querz.nbt.io.NBTOutputStream(gzip)){out.writeTag(new net.querz.nbt.io.NamedTag("",root),32);}
         var snapshot=new PlayerDataReader().read(file.toFile());
         var netherite=snapshot.inventoryIndex().stream().filter(i->i.itemKey().equals("minecraft:netherite_block")).findFirst().orElseThrow();
         assertEquals(0,netherite.direct());assertEquals(64,netherite.nested());

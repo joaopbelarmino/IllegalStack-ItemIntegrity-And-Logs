@@ -18,11 +18,18 @@ public final class ContainerResolver {
     public Optional<Resolved> resolve(Inventory inventory) {
         if (inventory == null) return Optional.empty();
         InventoryHolder holder = inventory.getHolder(false);
+        if (holder instanceof org.bukkit.entity.HumanEntity) return Optional.empty();
         if (inventory instanceof DoubleChestInventory doubleInventory) {
             return doubleChest(doubleInventory);
         }
         if (holder instanceof BlockState state) return block(state.getBlock(), inventory);
-        if (holder instanceof Entity entity) return entity(entity, inventory);
+        if (holder instanceof Entity entity) {
+            if (!(entity instanceof org.bukkit.entity.minecart.StorageMinecart
+                    || entity instanceof org.bukkit.entity.minecart.HopperMinecart
+                    || entity instanceof org.bukkit.entity.ChestBoat)) return Optional.empty();
+            if (!(entity instanceof InventoryHolder owner) || owner.getInventory() != inventory) return Optional.empty();
+            return entity(entity, inventory);
+        }
         if (holder instanceof DoubleChest chest && chest.getInventory() instanceof DoubleChestInventory doubleInventory) {
             return doubleChest(doubleInventory);
         }
@@ -30,7 +37,7 @@ public final class ContainerResolver {
     }
 
     public Optional<Resolved> resolve(Block block) {
-        if (block == null || !(block.getState() instanceof InventoryHolder holder)) return Optional.empty();
+        if (block == null || !(block.getState(false) instanceof InventoryHolder holder)) return Optional.empty();
         return resolve(holder.getInventory());
     }
 
