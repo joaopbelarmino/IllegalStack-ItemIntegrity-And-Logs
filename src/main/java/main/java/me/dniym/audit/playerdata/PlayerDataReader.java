@@ -29,14 +29,44 @@ public final class PlayerDataReader {
     private static final int MAX_DEPTH=3, MAX_ITEMS=4096;
 
     public Snapshot read(File file) throws IOException {
-        byte[] bytes=Files.readAllBytes(file.toPath());
+        long mtime=file.lastModified();
+        if(Files.size(file.toPath())>64*1024*1024)throw new IOException("playerdata excede 64 MiB");
+        byte[] bytes;
+        try(var input=Files.newInputStream(file.toPath())){bytes=input.readNBytes(64*1024*1024+1);}
         if(bytes.length>64*1024*1024)throw new IOException("playerdata excede 64 MiB");
-        NamedTag named=NBTUtil.read(file);
+        NamedTag named=readCompressed(bytes);
+        if(file.lastModified()!=mtime)throw new IOException("playerdata mudou durante leitura");
         if(!(named.getTag() instanceof CompoundTag root))throw new IOException("root NBT nao e compound");
         List<RawSlot> inventory=slots(root.getListTag("Inventory"));
         List<RawSlot> ender=slots(root.getListTag("EnderItems"));
-        return new Snapshot(uuid(file),file.lastModified(),hash(bytes),inventory,ender,
+        return new Snapshot(uuid(file),mtime,hash(bytes),inventory,ender,
                 root.getInt("DataVersion").orElse(0),aggregate(inventory),aggregate(ender));
+    }
+
+    public static NamedTag readCompressed(byte[] bytes)throws IOException{
+        byte[] raw=main.java.me.dniym.audit.container.SnapshotCodec.decompress(bytes,64*1024*1024);
+        NbtBounds.validate(raw);
+        try(var input=new net.querz.nbt.io.NBTInputStream(new java.io.ByteArrayInputStream(raw))){
+            return input.readTag(32);
+        }
+    }
+
+    /** Paper array envelope, version 1; no Bukkit/registry access on the database worker. */
+    public List<ItemAggregate> aggregateSerialized(byte[] bytes)throws IOException{
+        List<RawSlot> slots=new ArrayList<>();
+        try(var input=new java.io.DataInputStream(new java.io.ByteArrayInputStream(bytes))){
+            if(input.readByte()!=1)throw new IOException("Formato Paper desconhecido");
+            int count=input.readInt();if(count<0||count>4096)throw new IOException("Slots invalidos");
+            for(int i=0;i<count;i++){
+                int length=input.readInt();if(length==0)continue;
+                if(length<0||length>input.available())throw new IOException("Tamanho NBT invalido");
+                var named=readCompressed(input.readNBytes(length));
+                if(!(named.getTag() instanceof CompoundTag item))throw new IOException("Item NBT invalido");
+                slots.add(new RawSlot(i,item));
+            }
+            if(input.available()!=0)throw new IOException("Dados adicionais inesperados");
+        }
+        return aggregate(slots);
     }
 
     private List<RawSlot> slots(ListTag<?> list){
@@ -45,11 +75,11 @@ public final class PlayerDataReader {
         return out;
     }
 
-    private List<ItemAggregate> aggregate(List<RawSlot> slots){
+    public List<ItemAggregate> aggregate(List<RawSlot> slots){
         Map<String,Mutable> out=new HashMap<>();Counter count=new Counter();
         for(RawSlot slot:slots)visit(slot.item(),0,false,out,count);
         List<ItemAggregate> result=new ArrayList<>();
-        out.forEach((key,value)->result.add(new ItemAggregate(key,value.direct,value.nested,Set.copyOf(value.serials),Set.copyOf(value.custom))));
+        out.forEach((key,value)->result.add(new ItemAggregate(key,value.direct,value.nested,Map.copyOf(value.serials),Map.copyOf(value.custom))));
         return result;
     }
 
@@ -81,10 +111,10 @@ public final class PlayerDataReader {
     private void collectCustomData(CompoundTag components,Mutable value){
         CompoundTag custom=compound(components,"minecraft:custom_data");if(custom==null)return;
         String serial=string(custom,"zetra:serial",null),id=string(custom,"zetra:item_id",null);
-        if(serial!=null)value.serials.add(serial);if(id!=null)value.custom.add(id);
+        if(serial!=null)value.serials.merge(serial,1,Integer::sum);if(id!=null)(id.startsWith("ZI-")?value.serials:value.custom).merge(id,1,Integer::sum);
         CompoundTag publicBukkit=compound(custom,"PublicBukkitValues");if(publicBukkit!=null){
             serial=string(publicBukkit,"zetra:serial",null);id=string(publicBukkit,"zetra:item_id",null);
-            if(serial!=null)value.serials.add(serial);if(id!=null)value.custom.add(id);
+            if(serial!=null)value.serials.merge(serial,1,Integer::sum);if(id!=null)(id.startsWith("ZI-")?value.serials:value.custom).merge(id,1,Integer::sum);
         }
     }
     private CompoundTag compound(CompoundTag c,String key){Tag<?> t=c.get(key);return t instanceof CompoundTag v?v:null;}
@@ -95,5 +125,5 @@ public final class PlayerDataReader {
     public record RawSlot(int slot,CompoundTag item){}
     public record Snapshot(UUID uuid,long mtime,String hash,List<RawSlot> inventory,List<RawSlot> ender,int dataVersion,List<ItemAggregate> inventoryIndex,List<ItemAggregate> enderIndex){}
     private static final class Counter{int value;}
-    private static final class Mutable{long direct,nested;final HashSet<String>serials=new HashSet<>(),custom=new HashSet<>();}
+    private static final class Mutable{long direct,nested;final Map<String,Integer>serials=new HashMap<>(),custom=new HashMap<>();}
 }

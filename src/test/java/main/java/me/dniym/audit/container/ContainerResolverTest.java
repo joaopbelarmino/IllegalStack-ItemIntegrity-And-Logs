@@ -25,5 +25,18 @@ class ContainerResolverTest {
         var reversed=new ContainerResolver().resolve(doubleChest).orElseThrow().ref();
         assertEquals(first.uuid(),reversed.uuid());assertEquals(first.locationKey(),reversed.locationKey());assertEquals(19,first.x());
     }
+    @Test void rejectsPlayerOwnedEnderAndPluginMenus(){
+        var player=mock(org.bukkit.entity.Player.class);var inventory=mock(Inventory.class);
+        when(inventory.getHolder(false)).thenReturn(player);
+        when(player.getEnderChest()).thenReturn(inventory);
+        assertTrue(new ContainerResolver().resolve(inventory).isEmpty());
+        verifyNoInteractions(player);
+    }
+    @Test void rejectsUnrelatedEntityInventory(){
+        var entity=mock(org.bukkit.entity.minecart.StorageMinecart.class);
+        Inventory physical=mock(Inventory.class),menu=mock(Inventory.class);
+        when(entity.getInventory()).thenReturn(physical);when(menu.getHolder(false)).thenReturn(entity);
+        assertTrue(new ContainerResolver().resolve(menu).isEmpty());
+    }
     private BlockState state(World world,int x,int y,int z){BlockState state=mock(BlockState.class,withSettings().extraInterfaces(InventoryHolder.class));Block block=mock(Block.class);when(state.getBlock()).thenReturn(block);when(state.getLocation()).thenReturn(new Location(world,x,y,z));return state;}
 }

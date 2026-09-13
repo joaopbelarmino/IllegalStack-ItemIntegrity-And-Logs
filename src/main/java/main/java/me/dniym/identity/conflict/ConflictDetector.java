@@ -212,6 +212,9 @@ public final class ConflictDetector {
                 identity, canonical, conflicting, stack, revalidation, key,
                 confirmedDuplicate || (configuredMode == ConflictMode.DELETE && deleteAllowed && !virtual));
         boolean confirmedCase = isConfirmedDuplicateCase(snapshot);
+        var audit=plugin.getAuditModule();
+        if(audit!=null&&audit.enabled())audit.database().recordIntegrity(identity.id(),reason,
+                confirmedCase?"CONFIRMED_DUPLICATE":"POSSIBLE",confirmedCase?100:30);
         if (confirmedCase) {
             LOGGER.warn("[ItemIntegrity] Case {} {} item={} canonical={} conflicting={} action={}",
                     snapshot.caseId(), reason, identity.id(), canonical.holder().describe(),
