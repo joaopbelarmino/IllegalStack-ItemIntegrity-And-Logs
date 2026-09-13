@@ -60,6 +60,8 @@ dependencies {
 
     // SQLite uses JNI class names; retain org.sqlite when embedding the driver.
     implementation("org.xerial:sqlite-jdbc:3.51.3.0")
+    // Small Apache-2.0 parser used only for compressed offline playerdata NBT.
+    implementation("io.github.canary-prism:querz-nbt:6.2.1")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -77,6 +79,7 @@ tasks.shadowJar {
     archiveBaseName.set("Illegalstack-zetramc")
     archiveClassifier.set("")
     mergeServiceFiles()
+    relocate("net.querz", "main.java.me.dniym.libs.querz")
     // Nao precisamos de mais nada de sqlite-jdbc alem da classe JDBC em si -
     // isso mantem o jar final pequeno.
     minimize {
