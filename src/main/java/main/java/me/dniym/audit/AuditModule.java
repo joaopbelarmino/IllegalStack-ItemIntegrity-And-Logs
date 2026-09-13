@@ -45,6 +45,15 @@ public final class AuditModule {
             if(closing){db.close();return;}
             try{Scheduler.runTask(plugin,()->{
                 if(closing){CompletableFuture.runAsync(db::close);return;}
+                try{
+                    byte[] sample=SnapshotCodec.serialize(new ItemStack[]{new ItemStack(org.bukkit.Material.STONE,1)});
+                    var parsed=new PlayerDataReader().aggregateSerialized(sample);
+                    if(parsed.size()!=1||!parsed.getFirst().itemKey().equals("minecraft:stone")||parsed.getFirst().direct()!=1)
+                        throw new IOException("Formato Paper inesperado");
+                }catch(Exception incompatible){
+                    LOGGER.error("Auditoria desabilitada: autoteste do formato de snapshot Paper falhou",incompatible);
+                    CompletableFuture.runAsync(db::close);return;
+                }
                 database=db;resolver=new ContainerResolver();
                 var integrity=plugin.getItemIntegritySystem();aggregator=new ItemAggregator(integrity==null?null:integrity.identityService());
                 dirty=new DirtyContainerQueue(plugin,config,database,resolver,aggregator);
@@ -52,9 +61,9 @@ public final class AuditModule {
                 Bukkit.getPluginManager().registerEvents(new ContainerAuditListener(config,dirty),plugin);
                 Bukkit.getPluginManager().registerEvents(gui,plugin);Bukkit.getPluginManager().registerEvents(new PlayerAuditListener(playerdata),plugin);
                 enabled=true;
-                database.cleanup(config.destroyedRetentionDays());database.cleanupEvidence(config.backupRetentionDays());
-                cleanupTask=Scheduler.runTaskTimer(plugin,()->{database.cleanup(config.destroyedRetentionDays());database.cleanupEvidence(config.backupRetentionDays());},72000,72000);
-                LOGGER.info("Auditoria habilitada: {}",config.databaseFile());
+                database.cleanup(config.destroyedRetentionDays());database.cleanupEvidence(config.evidenceRetentionDays());
+                cleanupTask=Scheduler.runTaskTimer(plugin,()->{database.cleanup(config.destroyedRetentionDays());database.cleanupEvidence(config.evidenceRetentionDays());},72000,72000);
+                LOGGER.info("Auditoria habilitada (transferencia bloqueada ate validacao de recuperacao contra crash): {}",config.databaseFile());
             });}catch(RuntimeException e){db.close();LOGGER.error("Falha ao agendar inicializacao de auditoria",e);}
         });
     }
@@ -111,10 +120,10 @@ public final class AuditModule {
 
     public void transferContainer(Player admin,AuditDatabase.StoredContainer stored,ItemStack[] snapshot,Set<Integer> slots){
         if(!"ACTIVE".equals(stored.status())){message(admin,"Snapshot somente leitura.");return;}
-        java.util.function.Supplier<Inventory> source=()->dirty.resolveLive(stored.ref()).map(ContainerResolver.Resolved::inventory).orElse(null);
-        long topology=dirty.topologyRevision();
+        long topology=dirty.topologyRevision(stored.ref());
+        java.util.function.Supplier<Inventory> source=()->topology!=dirty.topologyRevision(stored.ref())?null:dirty.resolveLive(stored.ref()).map(ContainerResolver.Resolved::inventory).orElse(null);
         database.loadActive(stored.ref().locationKey()).whenComplete((active,error)->Scheduler.runTask(plugin,()->{
-            if(error!=null||active==null||!active.ref().uuid().equals(stored.ref().uuid())||topology!=dirty.topologyRevision()){
+            if(error!=null||active==null||!active.ref().uuid().equals(stored.ref().uuid())||topology!=dirty.topologyRevision(stored.ref())){
                 message(admin,"Registro do container mudou ou ainda nao foi salvo; reabra a interface.");return;
             }
             transfer(admin,source,stored.hash(),snapshot,slots,"CONTAINER",stored.ref().uuid().toString(),()->{
@@ -132,7 +141,7 @@ public final class AuditModule {
     private void transfer(Player admin,java.util.function.Supplier<Inventory> sourceSupplier,String expectedHash,
                           ItemStack[] snapshot,Set<Integer> slots,String type,String target,Runnable after){
         if(!enabled||!config.removalEnabled()||!admin.hasPermission("illegalstack.audit.edit")||!database.healthy()){
-            message(admin,"Transferencia indisponivel; confira permissao e banco.");return;
+            message(admin,"Transferencia temporariamente bloqueada: recuperacao contra crash ainda nao validada.");return;
         }
         if(slots.isEmpty()||!pendingAdmins.add(admin.getUniqueId()))return;
         try{
@@ -147,7 +156,7 @@ public final class AuditModule {
             }
             ItemStack[] afterDestination=planDestination(destination,moving,admin.getInventory().getMaxStackSize());
             if(afterDestination==null)throw new IllegalStateException("Inventario do administrador sem espaco.");
-            long topology=dirty.topologyRevision();
+
             String summary=moving.stream().map(i->i.getAmount()+"x "+i.getType().name()).collect(java.util.stream.Collectors.joining(", "));
             database.prepareTransfer(admin.getUniqueId(),admin.getName(),type,target,summary,sourceBytes,destinationBytes)
                 .whenComplete((action,error)->Scheduler.runTask(plugin,()->{
@@ -155,7 +164,7 @@ public final class AuditModule {
                         if(error!=null){message(admin,"Snapshot/auditoria falhou; nenhum item transferido.");return;}
                         Inventory current=sourceSupplier.get();
                         if(!enabled||!admin.isOnline()||!config.removalEnabled()||!admin.hasPermission("illegalstack.audit.edit")||current==null
-                                ||(type.equals("CONTAINER")&&topology!=dirty.topologyRevision())
+
                                 ||!Arrays.equals(before,current.getContents())||!Arrays.equals(destination,admin.getInventory().getStorageContents())){
                             database.finishTransfer(action,"TRANSFER_ABORTED_REVALIDATION");message(admin,"Estado mudou; transferencia cancelada.");return;
                         }

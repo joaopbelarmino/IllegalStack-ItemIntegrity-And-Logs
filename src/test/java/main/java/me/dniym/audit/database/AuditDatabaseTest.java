@@ -80,19 +80,30 @@ class AuditDatabaseTest {
             assertTrue(r.next());assertEquals("TRANSFER_ABORTED_REVALIDATION",r.getString(1));
         }
     }
+
+    @Test void oldPlayerAndNewContainerAreNotScoredAsSimultaneousCopies()throws Exception{
+        try(var db=new AuditDatabase(temp.resolve("handoff.db").toFile(),100)){
+            UUID player=UUID.randomUUID();var item=new ItemAggregate("minecraft:elytra",1,0,java.util.Map.of("ZI-transfer",1),java.util.Map.of());
+            db.replacePlayer(player,"Player",-1,"login",List.of(item),List.of()).get();
+            var box=ref("block:w:1:2:3",1);
+            assertTrue(db.submitContainer(new ContainerSnapshot(box,new byte[]{1},"new",List.of(item),null,null,AuditCause.PLAYER,100,false,null,0),false));
+            assertEquals(2,db.searchSerial("ZI-transfer",10,0).get().size());
+            assertTrue(db.suspicious(java.util.Map.of(),30,10).get().isEmpty());
+        }
+    }
     private ContainerRef ref(String key,int x){return new ContainerRef(ContainerRef.stableUuid(key),key,"world",x,2,3,null,"CHEST",27);}
     private ItemAggregate item(int amount){return new ItemAggregate("minecraft:diamond",amount,0,Set.of(),Set.of());}
     private void save(AuditDatabase db,ContainerRef ref,int amount,String hash,boolean destroyed,long now){
         assertTrue(db.submitContainer(new ContainerSnapshot(ref,new byte[]{1},hash,List.of(item(amount)),null,null,AuditCause.PLAYER,now,destroyed,null,0),false));
     }
-    @Test void suspiciousThresholdAndDuplicateSerialAreIndexed()throws Exception{
+    @Test void crossPlayerHistoricalSerialDoesNotIncreaseMaterialThresholdScore()throws Exception{
         AuditDatabase db=new AuditDatabase(temp.resolve("suspect.db").toFile(),100);
         try{
             var threshold=java.util.Map.of("netherite_block",new main.java.me.dniym.audit.AuditConfig.Threshold(64,256,40));
             UUID a=UUID.randomUUID(),b=UUID.randomUUID();
             ItemAggregate item=new ItemAggregate("minecraft:netherite_block",256,0,Set.of("same"),Set.of());
             db.replacePlayer(a,"A",1,"a",List.of(item),List.of()).get();db.replacePlayer(b,"B",1,"b",List.of(item),List.of()).get();
-            var results=db.suspicious(threshold,30,10).get();assertEquals(2,results.size());assertTrue(results.stream().allMatch(r->r.score()>=100));
+            var results=db.suspicious(threshold,30,10).get();assertEquals(2,results.size());assertTrue(results.stream().allMatch(r->r.score()==80));
         }finally{db.close();}
     }
 }
