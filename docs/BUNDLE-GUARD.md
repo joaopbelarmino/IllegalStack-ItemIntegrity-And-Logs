@@ -1,4 +1,4 @@
-# Alterações feitas sobre o IllegalStack oficial (dniym/IllegalStack, GPLv3)
+# BundleGuard: alterações sobre o IllegalStack original (GPLv3)
 
 Base: HEAD do repositório oficial na data desta modificação (versão 2.9.12a,
 mesma do jar que você já usa no ZetraMC).

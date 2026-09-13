@@ -1,19 +1,18 @@
 ---
-name: Feature request
-about: Suggest an idea for this project
+name: Sugerir melhoria
+about: Proponha uma melhoria para a fork ZetraMC
 title: ''
 assignees: ''
-
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+## Problema real
+Qual fluxo ou dificuldade motivou a proposta?
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+## Comportamento desejado
+O que deve mudar? O que deve permanecer igual?
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+## Segurança e desempenho
+Pode gerar falsos positivos? Exige scans, serialização, escrita em disco ou integração com outros plugins?
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+## Como validar
+Descreva um teste de aceitação e eventuais alternativas.

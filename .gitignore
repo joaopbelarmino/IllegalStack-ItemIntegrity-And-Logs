@@ -131,7 +131,6 @@ local.properties
 checkstyle.xml
 classes/
 *.bat
-docs/
 build/
 
 # Local credentials and runtime secrets must never be committed.
@@ -164,6 +163,7 @@ gradle-local.properties
 /dumps/
 /logs/
 /config.yml
+/item-audit.yml
 /item-integrity.yml
 /AntDupe-Stack-Config.yml
 *.log
