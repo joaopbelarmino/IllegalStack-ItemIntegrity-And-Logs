@@ -57,7 +57,7 @@ dependencies {
     // SQLite uses JNI class names; retain org.sqlite when embedding the driver.
     implementation("org.xerial:sqlite-jdbc:3.51.3.0")
 
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("cn.dreeam.leaf:leaf-api:1.21.11-R0.1-SNAPSHOT")
     testImplementation("org.mockito:mockito-core:5.15.2")
