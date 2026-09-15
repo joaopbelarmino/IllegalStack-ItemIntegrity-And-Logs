@@ -43,7 +43,7 @@ dependencies {
     compileOnly("cn.dreeam.leaf:leaf-api:1.21.11-R0.1-SNAPSHOT")
     compileOnly("com.github.dmulloy2:protocollib:5.0.0")
     compileOnly("com.elmakers.mine.bukkit:MagicAPI:10.2")
-    compileOnly("de.tr7zw:item-nbt-api-plugin:2.8.0")
+    compileOnly("de.tr7zw:item-nbt-api-plugin:2.16.0")
     compileOnly("com.github.TheBusyBiscuit:Slimefun4:RC-30") { isTransitive = false }
     compileOnly("io.netty:netty-all:4.1.110.Final") {
         because("The version aligns with the version used by Minecraft itself." +
