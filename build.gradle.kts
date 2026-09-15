@@ -61,8 +61,8 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("cn.dreeam.leaf:leaf-api:1.21.11-R0.1-SNAPSHOT")
     testImplementation("org.mockito:mockito-core:5.15.2")
-    testRuntimeOnly("org.apache.logging.log4j:log4j-api:2.24.1")
-    testRuntimeOnly("org.apache.logging.log4j:log4j-core:2.24.1")
+    testRuntimeOnly("org.apache.logging.log4j:log4j-api:2.26.1")
+    testRuntimeOnly("org.apache.logging.log4j:log4j-core:2.26.1")
 }
 
 tasks.test {
