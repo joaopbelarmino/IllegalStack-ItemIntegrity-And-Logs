@@ -1,5 +1,6 @@
 package main.java.me.dniym.identity;
 
+import io.papermc.paper.persistence.PersistentDataContainerView;
 import main.java.me.dniym.identity.config.ItemIntegrityConfig;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -55,11 +56,10 @@ public final class IdentityService {
 
     /** @return a identidade lida do item, ou null se ele não tiver zetra:item_id. */
     public ItemIdentity readIdentity(ItemStack stack) {
-        if (stack == null || !stack.hasItemMeta()) {
+        if (stack == null || stack.getType().isAir()) {
             return null;
         }
-        ItemMeta meta = stack.getItemMeta();
-        return readIdentity(meta.getPersistentDataContainer());
+        return readIdentity(stack.getPersistentDataContainer());
     }
 
     /** @return a identidade lida do bloco persistente, ou null se ele nÃ£o tiver zetra:item_id. */
@@ -70,7 +70,7 @@ public final class IdentityService {
         return readIdentity(tileState.getPersistentDataContainer());
     }
 
-    private ItemIdentity readIdentity(PersistentDataContainer pdc) {
+    ItemIdentity readIdentity(PersistentDataContainerView pdc) {
         if (!pdc.has(KEY_ITEM_ID, PersistentDataType.STRING)) {
             return null;
         }
@@ -118,10 +118,10 @@ public final class IdentityService {
     }
 
     public boolean copyIdentity(ItemStack source, TileState target) {
-        if (source == null || target == null || !source.hasItemMeta()) {
+        if (source == null || target == null) {
             return false;
         }
-        return copyIdentity(source.getItemMeta().getPersistentDataContainer(), target.getPersistentDataContainer());
+        return copyIdentity(source.getPersistentDataContainer(), target.getPersistentDataContainer());
     }
 
     public boolean copyIdentity(TileState source, ItemStack target) {
@@ -144,8 +144,10 @@ public final class IdentityService {
     }
 
     private void writeIdentity(ItemStack stack, ItemIdentity identity) {
-        ItemMeta meta = stack.getItemMeta();
-        PersistentDataContainer pdc = meta.getPersistentDataContainer();
+        stack.editPersistentDataContainer(pdc -> writeIdentity(pdc, identity));
+    }
+
+    private void writeIdentity(PersistentDataContainer pdc, ItemIdentity identity) {
         pdc.set(KEY_ITEM_ID, PersistentDataType.STRING, identity.id());
         pdc.set(KEY_REGISTERED_AT, PersistentDataType.LONG, identity.registeredAtEpochMs());
         pdc.set(KEY_ORIGIN, PersistentDataType.STRING, identity.origin().name());
@@ -161,10 +163,9 @@ public final class IdentityService {
         if (identity.registeredZ() != null) {
             pdc.set(KEY_Z, PersistentDataType.INTEGER, identity.registeredZ());
         }
-        stack.setItemMeta(meta);
     }
 
-    private boolean copyIdentity(PersistentDataContainer source, PersistentDataContainer target) {
+    private boolean copyIdentity(PersistentDataContainerView source, PersistentDataContainer target) {
         if (!source.has(KEY_ITEM_ID, PersistentDataType.STRING)) {
             return false;
         }
@@ -178,7 +179,7 @@ public final class IdentityService {
         return true;
     }
 
-    private void copyString(PersistentDataContainer source, PersistentDataContainer target, NamespacedKey key) {
+    private void copyString(PersistentDataContainerView source, PersistentDataContainer target, NamespacedKey key) {
         if (source.has(key, PersistentDataType.STRING)) {
             target.set(key, PersistentDataType.STRING, source.get(key, PersistentDataType.STRING));
         } else {
@@ -186,7 +187,7 @@ public final class IdentityService {
         }
     }
 
-    private void copyLong(PersistentDataContainer source, PersistentDataContainer target, NamespacedKey key) {
+    private void copyLong(PersistentDataContainerView source, PersistentDataContainer target, NamespacedKey key) {
         if (source.has(key, PersistentDataType.LONG)) {
             target.set(key, PersistentDataType.LONG, source.get(key, PersistentDataType.LONG));
         } else {
@@ -194,7 +195,7 @@ public final class IdentityService {
         }
     }
 
-    private void copyInteger(PersistentDataContainer source, PersistentDataContainer target, NamespacedKey key) {
+    private void copyInteger(PersistentDataContainerView source, PersistentDataContainer target, NamespacedKey key) {
         if (source.has(key, PersistentDataType.INTEGER)) {
             target.set(key, PersistentDataType.INTEGER, source.get(key, PersistentDataType.INTEGER));
         } else {

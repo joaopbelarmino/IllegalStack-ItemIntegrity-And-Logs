@@ -32,6 +32,10 @@ import java.util.concurrent.CompletableFuture;
  * bloquear o servidor.
  */
 public final class ItemIntegritySystem {
+    private IdentityPlayerInventoryListener playerInventoryListener;
+    public String scannerMetrics() {
+        return playerInventoryListener == null ? "disabled" : playerInventoryListener.metrics() + " " + conflictDetector.metrics();
+    }
 
     private final ItemIntegrityConfig config;
     private final IdentityService identityService;
@@ -73,6 +77,9 @@ public final class ItemIntegritySystem {
 
         this.auditQueue = queue;
         this.databaseService = db;
+        store = new main.java.me.dniym.identity.presence.DestinationTrackingStore(store,
+                new main.java.me.dniym.identity.presence.DestinationWindow(config.revalidationPendingLimit(),
+                        config.revalidationDestinationLimit(), main.java.me.dniym.identity.presence.DestinationWindow.DEFAULT_TTL_MS, System::currentTimeMillis));
         this.presenceStore = store;
         VirtualCustodyService virtualCustodyService = new VirtualCustodyService(identityService, presenceStore);
         this.webhookNotifier = new DiscordWebhookNotifier(config);
@@ -81,8 +88,8 @@ public final class ItemIntegritySystem {
                 webhookNotifier, caseFileLogger, presenceStore);
 
         if (config.isEnabled()) {
-            IdentityPlayerInventoryListener playerInventoryListener = new IdentityPlayerInventoryListener(plugin,
-                    migrationService, presenceStore, auditQueue, conflictDetector, config, virtualCustodyService);
+            playerInventoryListener = new IdentityPlayerInventoryListener(plugin,
+                    migrationService, presenceStore, auditQueue, conflictDetector, config, virtualCustodyService, identityService);
             new ItemIntegrityLifecycleListener(plugin, identityService, migrationService, presenceStore, auditQueue,
                     conflictDetector, playerInventoryListener, virtualCustodyService);
             new ShulkerIdentityListener(plugin, identityService, presenceStore);

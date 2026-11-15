@@ -11,6 +11,7 @@ website: https://www.spigotmc.org/resources/44411/
 commands:
   istack:
     description: allows  access to the /istack command
+    aliases: [stack]
     permission: illegalstack.help
     usage: "Usage: /istack"
 permissions:
@@ -25,6 +26,21 @@ permissions:
     default: op
   illegalstack.itemintegrity.inspect:
     description: Allows users to inspect Item Integrity IDs and presence state.
+    default: op
+  illegalstack.audit.search:
+    description: Allows searching the inventory audit index.
+    default: op
+  illegalstack.audit.view:
+    description: Allows viewing audited inventories.
+    default: op
+  illegalstack.audit.edit:
+    description: Allows confirmed transfer of audited items to an administrator.
+    default: op
+  illegalstack.audit.reindex:
+    description: Allows rebuilding the playerdata audit index.
+    default: op
+  illegalstack.audit.admin:
+    description: Allows audit reload, status and manual backups.
     default: op
   illegalstack.enchantbypass:
     description: Allows users with this perm to have items that break the vanilla enchant limits.

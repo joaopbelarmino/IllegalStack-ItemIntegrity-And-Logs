@@ -40,6 +40,7 @@ import java.util.HashSet;
 public class IllegalStack extends JavaPlugin {
 
     private main.java.me.dniym.identity.ItemIntegritySystem itemIntegritySystem;
+    private main.java.me.dniym.audit.AuditModule auditModule;
 
     private static final Logger LOGGER = LogManager.getLogger("IllegalStack/" + IllegalStack.class.getSimpleName());
 
@@ -89,6 +90,7 @@ public class IllegalStack extends JavaPlugin {
     public main.java.me.dniym.identity.ItemIntegritySystem getItemIntegritySystem() {
         return itemIntegritySystem;
     }
+    public main.java.me.dniym.audit.AuditModule getAuditModule() { return auditModule; }
 
     public void setPlugin(IllegalStack plugin) {
         IllegalStack.plugin = plugin;
@@ -579,6 +581,7 @@ public class IllegalStack extends JavaPlugin {
         }
 
         itemIntegritySystem = new main.java.me.dniym.identity.ItemIntegritySystem(this);
+        auditModule = new main.java.me.dniym.audit.AuditModule(this);
 
         if (Protections.RemoveOverstackedItems.isEnabled() || Protections.PreventVibratingBlocks.isEnabled()) {
             ScanTimer = Scheduler.runTaskTimerAsynchronously(
@@ -1055,6 +1058,9 @@ public class IllegalStack extends JavaPlugin {
 
         if (itemIntegritySystem != null) {
             itemIntegritySystem.shutdown();
+        }
+        if (auditModule != null) {
+            auditModule.shutdown();
         }
 
         writeConfig();

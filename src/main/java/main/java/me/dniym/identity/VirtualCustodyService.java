@@ -13,6 +13,10 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.BlockStateMeta;
 
 import java.util.Optional;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public final class VirtualCustodyService {
@@ -80,6 +84,35 @@ public final class VirtualCustodyService {
 
     public boolean tryCommitMissingPlayerItemToExternal(ItemIdentity identity, UUID previousPlayerId,
                                                         String previousPlayerName) {
+        Player player = Bukkit.getPlayer(previousPlayerId);
+        return player != null && tryCommitMissingPlayerItemsToExternal(List.of(identity), player) > 0;
+    }
+
+    /** One physical inventory read for the whole delayed batch, on the owning thread. */
+    public int tryCommitMissingPlayerItemsToExternal(Collection<ItemIdentity> identities, Player player) {
+        if (!player.isOnline() || identities.isEmpty()) {
+            return 0;
+        }
+        Set<String> present = new HashSet<>();
+        ItemStack[] contents = player.getInventory().getContents();
+        for (ItemStack item : contents) {
+            ItemIdentity identity = identityService.readIdentity(item);
+            if (identity != null) present.add(identity.id());
+        }
+        if (contents.length <= 40) {
+            ItemIdentity offhand = identityService.readIdentity(player.getInventory().getItemInOffHand());
+            if (offhand != null) present.add(offhand.id());
+        }
+        int committed = 0;
+        for (ItemIdentity identity : identities) {
+            if (!present.contains(identity.id()) && commitMissingPlayerItem(identity, player.getUniqueId())) {
+                committed++;
+            }
+        }
+        return committed;
+    }
+
+    private boolean commitMissingPlayerItem(ItemIdentity identity, UUID previousPlayerId) {
         Optional<PresenceRecord> canonicalOpt = presenceStore.getCanonical(identity);
         if (canonicalOpt.isEmpty()) {
             return false;
@@ -90,11 +123,6 @@ public final class VirtualCustodyService {
             return false;
         }
         if (!playerHolder.playerId().equals(previousPlayerId)) {
-            return false;
-        }
-
-        Player previousOwner = Bukkit.getPlayer(previousPlayerId);
-        if (previousOwner == null || physicallyContains(previousOwner, identity.id())) {
             return false;
         }
 

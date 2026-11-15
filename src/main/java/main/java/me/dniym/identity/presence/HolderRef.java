@@ -49,6 +49,14 @@ public sealed interface HolderRef {
         }
     }
 
+    record EnderChestHolder(UUID playerId, String playerName, Integer slot) implements HolderRef {
+        public EnderChestHolder { Objects.requireNonNull(playerId, "Ender Chest owner is required"); }
+        @Override public HolderType type() { return HolderType.ENDER_CHEST; }
+        @Override public String describe() {
+            return "ender_chest:" + playerId + (slot == null ? "" : ":slot" + slot);
+        }
+    }
+
     record ContainerHolder(HolderType type, String world, int x, int y, int z, Integer slot) implements HolderRef {
         public ContainerHolder {
             Objects.requireNonNull(type, "type is required for ContainerHolder");
@@ -110,6 +118,9 @@ public sealed interface HolderRef {
         if (a instanceof PlayerHolder pa && b instanceof PlayerHolder pb) {
             return pa.playerId().equals(pb.playerId());
         }
+        if (a instanceof EnderChestHolder ea && b instanceof EnderChestHolder eb) {
+            return ea.playerId().equals(eb.playerId());
+        }
         if (a instanceof ItemEntityHolder ea && b instanceof ItemEntityHolder eb) {
             return ea.entityUuid().equals(eb.entityUuid());
         }
@@ -130,6 +141,7 @@ public sealed interface HolderRef {
 
     /** Stable owner key used for conflict deduplication; slots are physical detail, not custody. */
     static String logicalOwnerKey(HolderRef holder) {
+        if (holder instanceof EnderChestHolder ender) return "ender_chest:" + ender.playerId();
         if (holder instanceof PlayerHolder player) {
             return "player:" + player.playerId();
         }

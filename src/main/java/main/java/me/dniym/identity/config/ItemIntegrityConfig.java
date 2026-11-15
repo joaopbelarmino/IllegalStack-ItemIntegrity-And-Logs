@@ -26,6 +26,11 @@ public final class ItemIntegrityConfig {
     private final File file;
     private YamlConfiguration yaml;
 
+    public int revalidationPendingLimit() { return Math.max(16, Math.min(8192, yaml.getInt("conflict-detector.revalidation.max-pending", 2048))); }
+    public int revalidationDestinationLimit() { return Math.max(2, Math.min(16, yaml.getInt("conflict-detector.revalidation.max-destinations", 8))); }
+    public boolean slotEventsEnabled() { return yaml.getBoolean("scanner.slot-events", true); }
+    public long reconciliationPeriodTicks() { return Math.max(20, yaml.getLong("scanner.reconciliation-period-ticks", 20)); }
+
     public ItemIntegrityConfig(Plugin plugin) {
         this.file = new File(plugin.getDataFolder(), "item-integrity.yml");
         load(plugin);
@@ -39,6 +44,12 @@ public final class ItemIntegrityConfig {
         this.yaml = YamlConfiguration.loadConfiguration(file);
 
         boolean changed = false;
+        for (var entry : java.util.Map.<String, Object>of(
+                "conflict-detector.revalidation.max-pending", 2048,
+                "conflict-detector.revalidation.max-destinations", 8,
+                "scanner.slot-events", true, "scanner.reconciliation-period-ticks", 20).entrySet()) {
+            if (!yaml.isSet(entry.getKey())) { yaml.set(entry.getKey(), entry.getValue()); changed = true; }
+        }
         if (!yaml.isSet("enabled")) {
             yaml.set("enabled", true);
             changed = true;
@@ -281,7 +292,8 @@ public final class ItemIntegrityConfig {
     }
 
     public int scannerMaxItemsPerCycle() {
-        return Math.max(32, yaml.getInt("scanner.max-items-per-cycle", 512));
+        // One atomic player reconciliation: 41 inventory slots + 27 Ender Chest slots.
+        return Math.max(68, yaml.getInt("scanner.max-items-per-cycle", 512));
     }
 
     public long scannerStatsLogIntervalMs() {
