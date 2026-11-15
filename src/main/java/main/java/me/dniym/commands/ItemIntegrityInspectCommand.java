@@ -216,8 +216,19 @@ final class ItemIntegrityInspectCommand {
         }
         sender.sendMessage(ChatColor.YELLOW + "[ItemIntegrity] Compactacao do SQLite iniciada.");
         sender.sendMessage(ChatColor.GRAY + "Preserva identidades/presencas e provas; reduz historico ao estado recente e limpa resumos antigos.");
-        system.compactSqlForCurrentModel().thenAccept(result ->
-                Scheduler.runTask(IllegalStack.getPlugin(), () -> printSqlMaintenanceResult(sender, result)));
+        // whenComplete: an exceptional completion must reach the sender instead of disappearing silently.
+        system.compactSqlForCurrentModel().whenComplete((result, error) ->
+                Scheduler.runTask(IllegalStack.getPlugin(), () -> {
+                    if (error != null || result == null) {
+                        IllegalStack.getPlugin().getLogger().log(java.util.logging.Level.SEVERE,
+                                "[ItemIntegrity] Compactacao SQLite terminou com erro inesperado.", error);
+                        sender.sendMessage(ChatColor.RED + "[ItemIntegrity] Compactacao falhou: "
+                                + (error == null ? "sem resultado" : error.getClass().getSimpleName() + ": " + error.getMessage())
+                                + ChatColor.GRAY + " (detalhes no console; banco mantido)");
+                        return;
+                    }
+                    printSqlMaintenanceResult(sender, result);
+                }));
     }
 
     private static void printSqlMaintenanceResult(CommandSender sender, DatabaseService.SqlMaintenanceResult result) {

@@ -463,6 +463,12 @@ public final class DatabaseService {
         } finally {
             manualMaintenancePending.set(false);
             nextRetentionMaintenanceAtMs = System.currentTimeMillis() + maintenanceIntervalMs;
+            // An Error (e.g. OutOfMemoryError during VACUUM) skips the catch above; never leave the command waiting forever.
+            if (!request.future().isDone()) {
+                long finished = System.currentTimeMillis();
+                request.future().complete(new SqlMaintenanceResult(false, "Falha inesperada na compactacao; veja o console. Banco mantido.",
+                        started, finished, sizeBefore, databaseSizeBytes(), -1, -1, -1, -1, -1, -1));
+            }
         }
     }
 
