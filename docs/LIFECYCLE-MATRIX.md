@@ -1,8 +1,8 @@
-# Zetra Item Integrity - Lifecycle Matrix
+# Item Integrity - Lifecycle Matrix
 
 This document is the internal source of truth for tracked item lifecycle coverage.
 External anti-dupe projects are used only as reference for event coverage and edge
-cases; Zetra keeps canonical presence, divergent observation, commitHandoff,
+cases; this project keeps canonical presence, divergent observation, commitHandoff,
 MONITOR/DELETE, writeAndConfirm, revalidation and FAIL_OPEN as the authority.
 
 ## Rules

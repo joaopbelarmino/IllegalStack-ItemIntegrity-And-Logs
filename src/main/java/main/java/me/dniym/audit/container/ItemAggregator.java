@@ -35,7 +35,7 @@ public final class ItemAggregator {
         if (contents != null) for (ItemStack item : contents) visit(item, 0, false, values, counter);
         List<ItemAggregate> out = new ArrayList<>();
         values.forEach((key, value) -> out.add(new ItemAggregate(key, value.direct, value.nested,
-                Set.copyOf(value.serials), Set.copyOf(value.customIds))));
+                Map.copyOf(value.serials), Map.copyOf(value.customIds))));
         return out;
     }
 
@@ -45,14 +45,15 @@ public final class ItemAggregator {
         Mutable value = values.computeIfAbsent(key, ignored -> new Mutable());
         if (nested) value.nested += item.getAmount(); else value.direct += item.getAmount();
         String serial = item.getPersistentDataContainer().get(SERIAL, PersistentDataType.STRING);
-        if (serial != null && !serial.isBlank()) value.serials.add(serial);
+        if (serial != null && !serial.isBlank()) value.serials.merge(serial,1,Integer::sum);
         ItemIdentity identity = identities == null ? null : identities.readIdentity(item);
-        if (identity != null) value.customIds.add(identity.id());
+        if (identity != null) value.serials.merge(identity.id(),1,Integer::sum);
         if (depth >= maxDepth || !item.hasItemMeta()) return;
-        if (item.getItemMeta() instanceof BlockStateMeta blockMeta
+        var meta=item.getItemMeta();
+        if (meta instanceof BlockStateMeta blockMeta
                 && blockMeta.getBlockState() instanceof InventoryHolder holder) {
             for (ItemStack child : holder.getInventory().getContents()) visit(child, depth + 1, true, values, counter);
-        } else if (item.getItemMeta() instanceof BundleMeta bundle && bundle.hasItems()) {
+        } else if (meta instanceof BundleMeta bundle && bundle.hasItems()) {
             for (ItemStack child : bundle.getItems()) visit(child, depth + 1, true, values, counter);
         }
     }
@@ -60,6 +61,6 @@ public final class ItemAggregator {
     private static final class Counter { int value; }
     private static final class Mutable {
         long direct, nested;
-        final HashSet<String> serials = new HashSet<>(), customIds = new HashSet<>();
+        final Map<String,Integer> serials = new HashMap<>(), customIds = new HashMap<>();
     }
 }

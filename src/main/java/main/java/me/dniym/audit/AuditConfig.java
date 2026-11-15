@@ -46,15 +46,17 @@ public final class AuditConfig {
         y.addDefault("audit.containers.debounce-ticks", 60);
         y.addDefault("audit.containers.max-dirty-ticks", 600);
         y.addDefault("audit.containers.snapshot-budget-per-cycle", 8);
+        y.addDefault("audit.containers.snapshot-budget-ms", 2.0);
         y.addDefault("audit.containers.dirty-capacity", 10000);
         y.addDefault("audit.containers.index-on-chunk-load", true);
         y.addDefault("audit.containers.destroyed-retention-days", 30);
         y.addDefault("audit.database.file", "item-audit.db");
         y.addDefault("audit.database.queue-capacity", 10000);
-        y.addDefault("audit.database.batch-size", 100);
+
         y.addDefault("audit.gui.allow-item-removal", true);
         y.addDefault("audit.gui.require-confirmation", true);
         y.addDefault("audit.backup.retention-days", 7);
+        y.addDefault("audit.evidence.retention-days", 7);
         y.addDefault("audit.backup.manual-retention-days", 0);
         y.addDefault("audit.suspicious.enabled", true);
         y.addDefault("audit.suspicious.minimum-score", 30);
@@ -80,16 +82,18 @@ public final class AuditConfig {
     public boolean containersEnabled() { return yaml.getBoolean("audit.containers.enabled", true); }
     public long debounceTicks() { return Math.max(1, yaml.getLong("audit.containers.debounce-ticks", 60)); }
     public long maxDirtyTicks() { return Math.max(debounceTicks(), yaml.getLong("audit.containers.max-dirty-ticks", 600)); }
+    public long snapshotBudgetNanos(){return (long)(Math.max(0.1,yaml.getDouble("audit.containers.snapshot-budget-ms",2.0))*1_000_000);}
     public int snapshotBudget() { return Math.max(1, yaml.getInt("audit.containers.snapshot-budget-per-cycle", 8)); }
     public int dirtyCapacity() { return Math.max(64, yaml.getInt("audit.containers.dirty-capacity", 10000)); }
     public boolean indexChunkLoad() { return yaml.getBoolean("audit.containers.index-on-chunk-load", true); }
     public int destroyedRetentionDays() { return Math.max(1, yaml.getInt("audit.containers.destroyed-retention-days", 30)); }
     public int dbQueueCapacity() { return Math.max(100, yaml.getInt("audit.database.queue-capacity", 10000)); }
-    public int dbBatchSize() { return Math.max(1, yaml.getInt("audit.database.batch-size", 100)); }
     public File databaseFile() { return new File(plugin.getDataFolder(), yaml.getString("audit.database.file", "item-audit.db")); }
-    public boolean removalEnabled() { return yaml.getBoolean("audit.gui.allow-item-removal", true); }
+    // Re-enable only with a tested recovery protocol spanning playerdata and chunk persistence.
+    public boolean removalEnabled() { return false; }
     public boolean confirmationRequired() { return yaml.getBoolean("audit.gui.require-confirmation", true); }
     public int backupRetentionDays() { return Math.max(1, yaml.getInt("audit.backup.retention-days", 7)); }
+    public int evidenceRetentionDays(){return Math.max(1,yaml.getInt("audit.evidence.retention-days",7));}
     public int manualBackupRetentionDays() { return Math.max(0, yaml.getInt("audit.backup.manual-retention-days", 0)); }
     public boolean suspiciousEnabled() { return yaml.getBoolean("audit.suspicious.enabled", true); }
     public int minimumScore() { return Math.max(0, yaml.getInt("audit.suspicious.minimum-score", 30)); }

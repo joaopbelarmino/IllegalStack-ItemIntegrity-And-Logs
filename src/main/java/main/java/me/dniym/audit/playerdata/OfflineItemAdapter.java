@@ -14,7 +14,7 @@ public final class OfflineItemAdapter {
         CompoundTag item=source.clone();
         if(!item.containsKey("DataVersion"))item.putInt("DataVersion",dataVersion);
         ByteArrayOutputStream bytes=new ByteArrayOutputStream();
-        try(NBTOutputStream out=new NBTOutputStream(bytes)){out.writeTag(new NamedTag("",item),512);}
+        try(NBTOutputStream out=new NBTOutputStream(new java.util.zip.GZIPOutputStream(bytes))){out.writeTag(new NamedTag("",item),512);}
         return ItemStack.deserializeBytes(bytes.toByteArray());
     }
 }
