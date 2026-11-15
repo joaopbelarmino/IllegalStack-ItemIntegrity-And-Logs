@@ -22,6 +22,53 @@ class DatabaseServiceTest {
     Path tempDir;
 
     @Test
+    void failedFinalWriteLeavesPendingAcrossRestart() throws Exception {
+        File file = tempDir.resolve("failed-outcome.db").toFile();
+        DatabaseService database = new DatabaseService(file, new AuditQueue(100), 20, 10, 7, 60000);
+        try {
+            assertTrue(database.writeAndConfirm(new AuditTask.PersistCase(caseSnapshot("pending", "pending",
+                    "CONFIRMED_DUPLICATE", "DELETE_PENDING", new byte[]{1}))).get(5, TimeUnit.SECONDS));
+            try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + file); Statement st = c.createStatement()) {
+                st.execute("CREATE TRIGGER fail_outcome BEFORE UPDATE OF action ON integrity_cases "
+                        + "BEGIN SELECT RAISE(ABORT, 'injected final write failure'); END");
+            }
+            assertFalse(database.writeAndConfirm(new AuditTask.PersistCase(caseSnapshot("pending", "pending",
+                    "CONFIRMED_DUPLICATE", "REMOVED", new byte[]{2}))).get(5, TimeUnit.SECONDS));
+        } finally { database.shutdown(); }
+        DatabaseService reopened = new DatabaseService(file, new AuditQueue(100), 20, 10, 7, 60000);
+        try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + file); Statement st = c.createStatement();
+             ResultSet row = st.executeQuery("SELECT action, conflicting_item_snapshot FROM integrity_cases WHERE case_id='pending'")) {
+            assertTrue(row.next()); assertEquals("DELETE_PENDING", row.getString(1));
+            org.junit.jupiter.api.Assertions.assertArrayEquals(new byte[]{1}, row.getBytes(2));
+        } finally { reopened.shutdown(); }
+    }
+
+    @Test
+    void pendingDeletionUpdatesOnlyOutcomeAndCannotBeReverted() throws Exception {
+        File file = tempDir.resolve("outcomes.db").toFile();
+        DatabaseService database = new DatabaseService(file, new AuditQueue(100), 20, 10, 7, 60000);
+        try {
+            for (String outcome : new String[]{"REMOVED", "DELETE_ABORTED_REVALIDATION_FAILED", "DELETE_ABORTED_PERSISTENCE_FAILED"}) {
+                var pending = caseSnapshot(outcome, outcome, "CONFIRMED_DUPLICATE", "DELETE_PENDING", new byte[]{1,2,3});
+                assertTrue(database.writeAndConfirm(new AuditTask.PersistCase(pending)).get(5, TimeUnit.SECONDS));
+                try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + file); Statement st = c.createStatement();
+                     ResultSet row = st.executeQuery("SELECT action FROM integrity_cases WHERE case_id='" + outcome + "'")) {
+                    assertTrue(row.next()); assertEquals("DELETE_PENDING", row.getString(1));
+                }
+                var completed = caseSnapshot(outcome, outcome, "CONFIRMED_DUPLICATE", outcome, new byte[]{9});
+                assertTrue(database.writeAndConfirm(new AuditTask.PersistCase(completed)).get(5, TimeUnit.SECONDS));
+                assertTrue(database.writeAndConfirm(new AuditTask.PersistCase(pending)).get(5, TimeUnit.SECONDS));
+                try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + file); Statement st = c.createStatement();
+                     ResultSet row = st.executeQuery("SELECT action, conflicting_item_snapshot FROM integrity_cases WHERE case_id='" + outcome + "'")) {
+                    assertTrue(row.next()); assertEquals(outcome, row.getString(1));
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(new byte[]{1,2,3}, row.getBytes(2));
+                    assertFalse(row.next());
+                }
+            }
+        } finally { database.shutdown(); }
+    }
+
+    @Test
     void corruptHistoryStopsMaintenanceAndConfirmedWritesWithoutDeletingData() throws Exception {
         File file = tempDir.resolve("corrupt.db").toFile();
         createLegacyDatabase(file);

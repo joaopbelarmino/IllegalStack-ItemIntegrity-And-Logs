@@ -1,36 +1,33 @@
 ---
-name: Bug Report
-about: Bug report for IllegalStack
+name: Relatar bug ou falso positivo
+about: Ajude a reproduzir um problema nesta fork
 title: ''
+labels: ''
 assignees: ''
-
 ---
 
-<!-- ⚠️⚠️ Do Not Delete This! You must follow this template. ⚠️⚠️ -->
-<!--- Incomplete reports will be marked as invalid, and closed, with few exceptions.-->
+## Ambiente
+- Branch e commit:
+- Versão do Java:
+- Build completa do Leaf/Paper:
+- Modo do Item Integrity (MONITOR/DELETE):
+- Plugins envolvidos no caminho:
 
-**Required Information**
-- FAVS Version Number (`/version IllegalStack`):
-- Spigot/Paper Version Number (`/version`):
-- Output of `/version`:
+## Reprodução
+1.
+2.
+3.
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## Esperado e observado
+Descreva o que deveria acontecer e o que aconteceu. Em falsos positivos, explique onde o item estava antes e depois, e se havia realmente duas cópias físicas.
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Run  to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+## Evidências
+Inclua apenas o trecho necessário do log. Para desempenho, inclua perfil Spark durante o problema, se disponível.
 
-**Plugins being used on the server**
-<!--- Optional but recommended - issue "/plugins" in-game or in console and copy/paste the list -->
+**Não publique credenciais, URLs de webhook, playerdata, bancos ou IPs. Para um exploit ativo, consulte SECURITY.md antes de divulgar a reprodução.**
 
-**Checklist**:
-<!--- Make sure you've completed the following steps (put an "X" between of brackets): -->
-- [] I included all information required in the sections above
-- [] I made sure there are no duplicates of this report [(Use Search)](https://github.com/dniym/IllegalStack/issues?q=is%3Aissue+is%3Aopen+)
-- [] I made sure I am using an up-to-date version of [IllegalStack](https://www.spigotmc.org/resources/44411/)
-- [] I made sure the bug/error is not caused by any other plugin
-
+## Checklist
+- [ ] Consultei issues existentes desta fork.
+- [ ] Identifiquei o commit, não apenas a versão 3.0.
+- [ ] Removi dados sensíveis.
+- [ ] Informei quais etapas consegui reproduzir em ambiente de teste.
