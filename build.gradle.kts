@@ -59,7 +59,7 @@ dependencies {
     // Small Apache-2.0 parser used only for compressed offline playerdata NBT.
     implementation("io.github.canary-prism:querz-nbt:6.2.1")
 
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("cn.dreeam.leaf:leaf-api:1.21.11-R0.1-SNAPSHOT")
     testImplementation("org.mockito:mockito-core:5.23.0")
