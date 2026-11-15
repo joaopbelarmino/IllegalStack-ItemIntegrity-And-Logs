@@ -27,7 +27,7 @@ public final class ContainerResolver {
             if (!(entity instanceof org.bukkit.entity.minecart.StorageMinecart
                     || entity instanceof org.bukkit.entity.minecart.HopperMinecart
                     || entity instanceof org.bukkit.entity.ChestBoat)) return Optional.empty();
-            if (!(entity instanceof InventoryHolder owner) || owner.getInventory() != inventory) return Optional.empty();
+            if (!(entity instanceof InventoryHolder owner) || !owner.getInventory().equals(inventory)) return Optional.empty();
             return entity(entity, inventory);
         }
         if (holder instanceof DoubleChest chest && chest.getInventory() instanceof DoubleChestInventory doubleInventory) {

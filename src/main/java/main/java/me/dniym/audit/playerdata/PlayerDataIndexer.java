@@ -28,11 +28,20 @@ public final class PlayerDataIndexer implements AutoCloseable {
     private final IllegalStack plugin;private final AuditConfig config;private final AuditDatabase db;
     private final PlayerDataReader reader=new PlayerDataReader();private final ItemAggregator liveAggregator;
     private final ExecutorService worker=new java.util.concurrent.ThreadPoolExecutor(1,1,0,java.util.concurrent.TimeUnit.MILLISECONDS,new java.util.concurrent.ArrayBlockingQueue<>(256),r->{Thread t=new Thread(r,"IllegalStack-Playerdata-Index");t.setDaemon(true);return t;},new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+    private final ExecutorService liveWorker=new java.util.concurrent.ThreadPoolExecutor(1,1,0,java.util.concurrent.TimeUnit.MILLISECONDS,new java.util.concurrent.ArrayBlockingQueue<>(64),r->{Thread t=new Thread(r,"IllegalStack-Audit-Live-Index");t.setDaemon(true);return t;},new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+    private final ExecutorService interactive=new java.util.concurrent.ThreadPoolExecutor(1,1,0,java.util.concurrent.TimeUnit.MILLISECONDS,new java.util.concurrent.ArrayBlockingQueue<>(32),r->{Thread t=new Thread(r,"IllegalStack-Audit-Requests");t.setDaemon(true);return t;},new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+    private <T> java.util.concurrent.CompletableFuture<T> requestTask(java.util.function.Supplier<T> task){
+        try{return java.util.concurrent.CompletableFuture.supplyAsync(task,interactive);}
+        catch(java.util.concurrent.RejectedExecutionException e){return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("Fila de auditoria cheia; tente novamente."));}
+    }
     private final Map<UUID,Long> mtimes=new ConcurrentHashMap<>();private final Map<UUID,String> knownNames=new ConcurrentHashMap<>();private final AtomicBoolean scanning=new AtomicBoolean();
     private final File playerdataDirectory;
     private final File userCacheFile;
     private final File backupRoot;
-    private volatile java.util.Set<UUID> online=java.util.Set.of();
+    private final java.util.Set<UUID> online=ConcurrentHashMap.newKeySet();
+    private final java.util.LinkedHashMap<UUID,Long> dirtyPlayers=new java.util.LinkedHashMap<>();
+    private final Scheduler.ScheduledTask playerFlushTask;
+    private final AtomicLong pendingLiveBytes=new AtomicLong();
     private final AtomicLong scanned=new AtomicLong(),failed=new AtomicLong();private volatile long total,lastScan;
     private final Scheduler.ScheduledTask reconcileTask;
 
@@ -41,22 +50,44 @@ public final class PlayerDataIndexer implements AutoCloseable {
         this.playerdataDirectory=new File(new File(Bukkit.getWorldContainer(),config.playerdataWorld()),"playerdata");
         this.userCacheFile=new File(Bukkit.getWorldContainer(),"usercache.json");
         this.backupRoot=new File(plugin.getDataFolder(),"audit-backups");
+        Bukkit.getOnlinePlayers().forEach(p->{online.add(p.getUniqueId());markOnline(p);});
+        playerFlushTask=Scheduler.runTaskTimer(plugin,this::flushOnline,1,1);
         reconcileTask=Scheduler.runTaskTimer(plugin,()->requestScan(false),config.reconcileTicks(),config.reconcileTicks());
         if(config.initialIndex())requestScan(false);
     }
 
     public void requestScan(boolean force){
-        online=Bukkit.getOnlinePlayers().stream().map(Player::getUniqueId).collect(java.util.stream.Collectors.toUnmodifiableSet());
+
         if(!config.playerdataEnabled()||!scanning.compareAndSet(false,true))return;
         try{worker.execute(()->scan(force));}catch(java.util.concurrent.RejectedExecutionException e){scanning.set(false);}
     }
-    public void request(UUID uuid){worker.execute(()->index(file(uuid),true));}
+    public void request(UUID uuid){try{worker.execute(()->index(file(uuid),true));}catch(java.util.concurrent.RejectedExecutionException e){throw new IllegalArgumentException("Fila de auditoria cheia; tente novamente.");}}
+    public void joined(Player player){online.add(player.getUniqueId());indexOnline(player);}
+    public void quit(Player player){indexOnline(player);online.remove(player.getUniqueId());dirtyPlayers.remove(player.getUniqueId());}
+    public void markOnline(Player player){
+        if(!config.playerdataEnabled())return;
+        if(dirtyPlayers.size()<4096||dirtyPlayers.containsKey(player.getUniqueId()))
+            dirtyPlayers.putIfAbsent(player.getUniqueId(),System.currentTimeMillis()+30000);
+    }
+    private void flushOnline(){
+        var it=dirtyPlayers.entrySet().iterator();if(!it.hasNext())return;
+        var e=it.next();if(e.getValue()>System.currentTimeMillis())return;
+        UUID id=e.getKey();it.remove();Player player=Bukkit.getPlayer(id);
+        if(player!=null&&player.isOnline())indexOnline(player);
+    }
     public void indexOnline(Player player){
+        if(!config.playerdataEnabled())return;
         knownNames.put(player.getUniqueId(),player.getName());
         UUID id=player.getUniqueId();String name=player.getName();
         byte[] inv=main.java.me.dniym.audit.container.SnapshotCodec.serialize(player.getInventory().getContents());
         byte[] end=main.java.me.dniym.audit.container.SnapshotCodec.serialize(player.getEnderChest().getContents());
-        try{worker.execute(()->{try{db.replacePlayer(id,name,-1,"online",reader.aggregateSerialized(inv),reader.aggregateSerialized(end));}catch(IOException e){failed.incrementAndGet();}});}catch(java.util.concurrent.RejectedExecutionException e){failed.incrementAndGet();}
+        long bytes=(long)inv.length+end.length;
+        if(pendingLiveBytes.addAndGet(bytes)>64L*1024*1024){pendingLiveBytes.addAndGet(-bytes);failed.incrementAndGet();return;}
+        try{liveWorker.execute(()->{
+            try{db.replacePlayer(id,name,-1,"online",reader.aggregateSerialized(inv),reader.aggregateSerialized(end));}
+            catch(IOException e){failed.incrementAndGet();db.recordReadFailure("PLAYER",id,e.getClass().getSimpleName());}
+            finally{pendingLiveBytes.addAndGet(-bytes);}
+        });}catch(java.util.concurrent.RejectedExecutionException e){pendingLiveBytes.addAndGet(-bytes);failed.incrementAndGet();}
     }
     private void scan(boolean force){
         try{
@@ -88,27 +119,29 @@ public final class PlayerDataIndexer implements AutoCloseable {
         try{
             UUID id=UUID.fromString(file.getName().substring(0,file.getName().length()-4));long m=file.lastModified();
             if(!force&&mtimes.getOrDefault(id,-1L)==m)return;
+            if(online.contains(id))return;
             PlayerDataReader.Snapshot snapshot=readRetry(file);
+            if(online.contains(id))return;
             if(Boolean.TRUE.equals(db.replacePlayer(id,knownNames.get(id),snapshot.mtime(),snapshot.hash(),snapshot.inventoryIndex(),snapshot.enderIndex()).join()))mtimes.put(id,snapshot.mtime());
-        }catch(Exception e){failed.incrementAndGet();LOGGER.warn("[IllegalStack] Playerdata {} foi ignorado nesta rodada: {}",file.getName(),e.getMessage());}
+        }catch(Exception e){db.recordReadFailure("PLAYER",UUID.fromString(file.getName().substring(0,36)),e.getClass().getSimpleName());failed.incrementAndGet();LOGGER.warn("[IllegalStack] Playerdata {} foi ignorado nesta rodada: {}",file.getName(),e.getMessage());}
     }
     private PlayerDataReader.Snapshot readRetry(File file)throws IOException{
         try{return reader.read(file);}catch(IOException first){try{Thread.sleep(config.retryDelayMs());}catch(InterruptedException e){Thread.currentThread().interrupt();throw first;}return reader.read(file);}
     }
     public PlayerDataReader.Snapshot read(UUID uuid)throws IOException{return reader.read(file(uuid));}
-    public java.util.concurrent.CompletableFuture<PlayerDataReader.Snapshot> readAsync(UUID uuid){return java.util.concurrent.CompletableFuture.supplyAsync(()->{try{return read(uuid);}catch(IOException e){throw new java.util.concurrent.CompletionException(e);}},worker);}
+    public java.util.concurrent.CompletableFuture<PlayerDataReader.Snapshot> readAsync(UUID uuid){return requestTask(()->{try{return read(uuid);}catch(IOException e){throw new java.util.concurrent.CompletionException(e);}});}
     public File file(UUID uuid){return new File(directory(),uuid+".dat");}
     private File directory(){return playerdataDirectory;}
-    public java.util.concurrent.CompletableFuture<File> backup(UUID uuid,boolean manual){return java.util.concurrent.CompletableFuture.supplyAsync(()->{
+    public java.util.concurrent.CompletableFuture<File> backup(UUID uuid,boolean manual){return requestTask(()->{
         File source=file(uuid);if(!source.isFile())throw new IllegalArgumentException("Playerdata nao encontrado");
         File folder=new File(backupRoot,(manual?"manual":"automatic")+"/"+uuid);if(!folder.exists()&&!folder.mkdirs())throw new IllegalStateException("Falha ao criar pasta de backup");
         File target=new File(folder,Instant.now().toEpochMilli()+".dat");try{Files.copy(source.toPath(),target.toPath(),StandardCopyOption.COPY_ATTRIBUTES);return target;}catch(IOException e){throw new java.util.concurrent.CompletionException(e);}
-    },worker);}
+    });}
     public static boolean isPlayerFile(String name){return name.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\.dat");}
     public UUID cachedId(String name){
         return knownNames.entrySet().stream().filter(e->e.getValue().equalsIgnoreCase(name)).map(Map.Entry::getKey).findFirst().orElse(null);
     }
     public Progress progress(){return new Progress(scanning.get(),scanned.get(),total,failed.get(),lastScan);}
-    @Override public void close(){reconcileTask.cancel();worker.shutdownNow();}
+    @Override public void close(){reconcileTask.cancel();playerFlushTask.cancel();worker.shutdownNow();interactive.shutdownNow();liveWorker.shutdownNow();}
     public record Progress(boolean running,long scanned,long total,long failed,long lastScan){}
 }

@@ -208,7 +208,7 @@ public final class DiscordWebhookNotifier {
     }
 
     static String embedPayload(AlertKind kind, String message, long now) {
-        return JSON.toJson(Map.of("username", "Zetra Item Integrity",
+        return JSON.toJson(Map.of("username", "Item Integrity",
                 "allowed_mentions", Map.of("parse", List.of()),
                 "embeds", List.of(Map.of(
                         "title", kind == AlertKind.CONFIRMED ? "Duplicacao confirmada" : "Possivel conflito de integridade",

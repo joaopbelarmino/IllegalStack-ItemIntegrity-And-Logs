@@ -49,6 +49,7 @@ public final class AuditDatabase implements AutoCloseable {
         try (Statement s = connection.createStatement()) {
             s.execute("PRAGMA journal_mode=WAL"); s.execute("PRAGMA synchronous=NORMAL");
             s.execute("PRAGMA busy_timeout=5000"); s.execute("PRAGMA wal_autocheckpoint=1000");
+            s.execute("CREATE TABLE IF NOT EXISTS audit_read_failures (target_type TEXT NOT NULL,target_uuid TEXT NOT NULL,detail TEXT,observed_at INTEGER NOT NULL,PRIMARY KEY(target_type,target_uuid))");
             s.execute("CREATE TABLE IF NOT EXISTS audit_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
             s.execute("INSERT INTO audit_meta VALUES ('schema_version','1') ON CONFLICT(key) DO NOTHING");
             s.execute("""
@@ -175,10 +176,19 @@ public final class AuditDatabase implements AutoCloseable {
             try{
                 var items=new main.java.me.dniym.audit.playerdata.PlayerDataReader().aggregateSerialized(bytes);
                 saveContainer(new ContainerSnapshot(ref,bytes,SnapshotCodec.hash(bytes),items,player,name,cause,now,destroyed,destroyed?player:null,0),false,interactions);
-            }catch(Exception e){fail(e);}finally{pendingBytes.addAndGet(-bytes.length);}
+            }catch(Exception e){storeReadFailure("CONTAINER",ref.uuid(),e.getClass().getSimpleName());}finally{pendingBytes.addAndGet(-bytes.length);}
         });
         if(!accepted)pendingBytes.addAndGet(-bytes.length);
         return accepted;
+    }
+    public void recordReadFailure(String type,UUID id,String detail){execute(()->storeReadFailure(type,id,detail));}
+    private void storeReadFailure(String type,UUID id,String detail){
+        try(var p=connection.prepareStatement("INSERT INTO audit_read_failures VALUES(?,?,?,?) ON CONFLICT(target_type,target_uuid) DO UPDATE SET detail=excluded.detail,observed_at=excluded.observed_at")){
+            p.setString(1,type);p.setString(2,id.toString());p.setString(3,detail);p.setLong(4,System.currentTimeMillis());p.executeUpdate();
+        }catch(SQLException e){fail(e);}
+    }
+    private void clearReadFailure(String type,UUID id)throws SQLException{
+        try(var p=connection.prepareStatement("DELETE FROM audit_read_failures WHERE target_type=? AND target_uuid=?")){p.setString(1,type);p.setString(2,id.toString());p.executeUpdate();}
     }
     public record InteractionDelta(String name,long first,long last,int count){}
     private void saveInteractions(String id,Map<UUID,InteractionDelta> interactions)throws SQLException {
@@ -240,6 +250,7 @@ public final class AuditDatabase implements AutoCloseable {
                     p.setString(3,snapshot.lastPlayerName());p.setLong(4,snapshot.capturedAt());p.setLong(5,snapshot.capturedAt());p.setInt(6,snapshot.interactionCount());p.executeUpdate();
                 }
             }
+            clearReadFailure("CONTAINER",snapshot.ref().uuid());
             saveInteractions(r.uuid().toString(),interactions);
             connection.commit();healthy=true;return true;
         } catch (Exception e) { rollback(e);return false; }
@@ -259,6 +270,7 @@ public final class AuditDatabase implements AutoCloseable {
                 try (PreparedStatement p=connection.prepareStatement("DELETE FROM serial_index WHERE target_type='PLAYER' AND target_uuid=?")){p.setString(1,player.toString());p.executeUpdate();}
                 replaceSerials("PLAYER",player.toString(),"INV",inventory,System.currentTimeMillis());
                 replaceSerials("PLAYER",player.toString(),"ENDER",ender,System.currentTimeMillis());
+                clearReadFailure("PLAYER",player);
                 connection.commit(); healthy=true;return true;
             } catch(Exception e){rollback(e);return false;} finally {autoCommit();}
         });
@@ -327,8 +339,14 @@ public final class AuditDatabase implements AutoCloseable {
                     }}
                 }
             }
-            try(var p=readerConnection.prepareStatement("SELECT serial,target_type,target_uuid,source FROM serial_index WHERE serial NOT LIKE 'custom:%' AND serial IN (SELECT serial FROM serial_index WHERE serial NOT LIKE 'custom:%' GROUP BY serial HAVING SUM(occurrences)>1)");var r=p.executeQuery()){
-                while(r.next()){String id=r.getString(2)+":"+r.getString(3);var v=values.computeIfAbsent(id,k->new MutableSuspicious(rString(r,2),rString(r,3),rString(r,4)));String reason="POSSIBLE_DUPLICATE_ID="+r.getString(1);if(!v.details.contains(reason)){v.score+=100;v.details.add(reason);}}
+            try(var p=readerConnection.prepareStatement("SELECT serial,target_type,target_uuid,source FROM serial_index WHERE serial NOT LIKE 'custom:%' AND  (serial,target_type,target_uuid) IN (SELECT serial,target_type,target_uuid FROM serial_index WHERE serial NOT LIKE 'custom:%' GROUP BY serial,target_type,target_uuid HAVING SUM(occurrences)>1)");var r=p.executeQuery()){
+                while(r.next()){String id=r.getString(2)+":"+r.getString(3);var v=values.computeIfAbsent(id,k->new MutableSuspicious(rString(r,2),rString(r,3),rString(r,4)));String reason="SAME_SNAPSHOT_REPEATED_ID="+r.getString(1);if(!v.details.contains(reason)){v.score+=100;v.details.add(reason);}}
+            }
+            try(var p=readerConnection.prepareStatement("SELECT 'PLAYER',player_uuid FROM player_item_index WHERE item_key='audit:nbt_limit' UNION SELECT 'CONTAINER',i.container_uuid FROM container_item_index i JOIN containers c ON c.uuid=i.container_uuid WHERE i.item_key='audit:nbt_limit' AND c.status='ACTIVE'");var r=p.executeQuery()){
+                while(r.next()){String id=r.getString(1)+":"+r.getString(2);var v=values.computeIfAbsent(id,k->new MutableSuspicious(rString(r,1),rString(r,2),"PARTIAL"));v.score+=30;v.details.add("NBT_LIMIT: indice parcial, nao prova duplicacao");}
+            }
+            try(var p=readerConnection.prepareStatement("SELECT target_type,target_uuid,detail FROM audit_read_failures");var r=p.executeQuery()){
+                while(r.next()){String id=r.getString(1)+":"+r.getString(2);var v=values.computeIfAbsent(id,k->new MutableSuspicious(rString(r,1),rString(r,2),"UNREADABLE"));v.score+=30;v.details.add("NBT_READ_FAILED: estado atual desconhecido, "+r.getString(3));}
             }
             try(var p=readerConnection.prepareStatement("SELECT s.target_type,s.target_uuid,s.source,f.reason,MAX(f.score) FROM integrity_flags f JOIN serial_index s ON s.serial=f.target_uuid WHERE f.target_type='ITEM' GROUP BY s.target_type,s.target_uuid,f.reason");var r=p.executeQuery()){
                 while(r.next()){String id=r.getString(1)+":"+r.getString(2);var v=values.computeIfAbsent(id,k->new MutableSuspicious(rString(r,1),rString(r,2),rString(r,3)));v.score+=r.getInt(5);v.details.add("ITEM_INTEGRITY_HISTORY="+r.getString(4));}
