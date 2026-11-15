@@ -1626,10 +1626,11 @@ public enum Protections {
 
     public boolean isEnabled(Object obj) {
     	
-    	World wld = getWorldFromObj(obj);
-    	
+    	// Cheap flag first: resolving the world may build Location/holder objects and runs per scanned item.
     	if(!isEnabled())
     		return false;
+    	
+    	World wld = getWorldFromObj(obj);
     	
     	if(wld != null && isDisabledInWorld(wld))
     			return false;
@@ -1661,14 +1662,16 @@ public enum Protections {
         			if(inv.getViewers().get(0).getLocation() != null)
         				return inv.getViewers().get(0).getWorld();
         		} else {
-        			if(inv.getHolder() instanceof Player) {
-        				Player p = (Player) inv.getHolder();
+        			// getHolder(false): no block-state snapshot copy; only the type and the block's world are read.
+        			org.bukkit.inventory.InventoryHolder holder = inv.getHolder(false);
+        			if(holder instanceof Player) {
+        				Player p = (Player) holder;
         				if(p != null)
         					return p.getWorld();
         			}
-        			if(inv.getHolder() instanceof BlockInventoryHolder)
+        			if(holder instanceof BlockInventoryHolder)
         			{
-        				BlockInventoryHolder bi = ((BlockInventoryHolder)inv.getHolder());
+        				BlockInventoryHolder bi = ((BlockInventoryHolder)holder);
         				if(bi != null)
         				{
         					Block b = bi.getBlock();
