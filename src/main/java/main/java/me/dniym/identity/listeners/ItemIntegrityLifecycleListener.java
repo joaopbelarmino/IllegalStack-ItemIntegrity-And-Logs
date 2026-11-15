@@ -119,6 +119,7 @@ public final class ItemIntegrityLifecycleListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onInventoryCreative(InventoryCreativeEvent event) {
+        if (playerScanner.slotEventsEnabled()) return;
         if (event.getWhoClicked() instanceof Player player) {
             playerScanner.scheduleScan(player, PresenceState.LIVE_CONFIRMED);
         }
@@ -126,6 +127,7 @@ public final class ItemIntegrityLifecycleListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerArmorChange(PlayerArmorChangeEvent event) {
+        if (playerScanner.slotEventsEnabled()) return;
         ItemIdentity equipped = identityService.readIdentity(event.getNewItem());
         ItemIdentity unequipped = identityService.readIdentity(event.getOldItem());
         if (equipped == null && unequipped == null) {
@@ -152,6 +154,7 @@ public final class ItemIntegrityLifecycleListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
+        if (playerScanner.slotEventsEnabled()) return;
         Map<String, ItemIdentity> before = trackedPlayerInventory(event.getPlayer());
         for (ItemIdentity identity : before.values()) {
             playerScanner.scheduleExternalCustodyCheck(event.getPlayer(), identity);
@@ -228,11 +231,13 @@ public final class ItemIntegrityLifecycleListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onAttemptPickup(PlayerAttemptPickupItemEvent event) {
+        if (playerScanner.slotEventsEnabled()) return;
         playerScanner.scheduleScan(event.getPlayer(), PresenceState.LIVE_CONFIRMED);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPickup(EntityPickupItemEvent event) {
+        if (playerScanner.slotEventsEnabled()) return;
         if (event.getEntity() instanceof Player player) {
             playerScanner.scheduleScan(player, PresenceState.LIVE_CONFIRMED);
         }
@@ -368,6 +373,10 @@ public final class ItemIntegrityLifecycleListener implements Listener {
     }
 
     private void scanInventory(Inventory inventory, Player viewer, InventorySnapshot snapshot) {
+        if (isOwnedEnderChest(inventory, viewer)) {
+            playerScanner.scanEnderChest(viewer, PresenceState.PERSISTED_CONTAINER, snapshot.contents());
+            return;
+        }
         Map<String, NestedShulkerCustody> carriedShulkerContents = inventory.getType() == InventoryType.SHULKER_BOX
                 ? indexCarriedShulkerContents(viewer) : Map.of();
         for (ObservedInventoryItem observed : snapshot.items()) {
@@ -416,7 +425,7 @@ public final class ItemIntegrityLifecycleListener implements Listener {
                 if (inventory.getLocation() != null || isVirtualInventoryCandidate(inventory)) {
                     scanInventory(inventory, viewer, after);
                 }
-                playerScanner.scanPlayer(viewer, PresenceState.LIVE_CONFIRMED);
+                if (!playerScanner.slotEventsEnabled()) playerScanner.scanPlayer(viewer, PresenceState.LIVE_CONFIRMED);
             }, 1, viewer);
         } catch (RuntimeException error) {
             pendingInventories.remove(key, before);
@@ -438,7 +447,7 @@ public final class ItemIntegrityLifecycleListener implements Listener {
                 found.putIfAbsent(identity.id(), new TrackedInventoryItem(identity, holder));
             }
         }
-        return new InventorySnapshot(items, found);
+        return new InventorySnapshot(items, found, contents);
     }
 
     private void reconcileInventoryRemovals(Player viewer, Map<String, TrackedInventoryItem> before,
@@ -465,7 +474,8 @@ public final class ItemIntegrityLifecycleListener implements Listener {
 
     private record InventoryReconciliationKey(java.util.UUID viewer, Inventory inventory) {}
     private record ObservedInventoryItem(ItemStack item, ItemIdentity identity, HolderRef holder) {}
-    private record InventorySnapshot(List<ObservedInventoryItem> items, Map<String, TrackedInventoryItem> tracked) {}
+    private record InventorySnapshot(List<ObservedInventoryItem> items, Map<String, TrackedInventoryItem> tracked,
+                                     ItemStack[] contents) {}
 
     private boolean canonicalMatchesInventorySource(ItemIdentity identity, HolderRef source, Player viewer) {
         return presenceStore.getCanonical(identity).map(PresenceRecord::holder).map(canonical -> {
@@ -632,6 +642,7 @@ public final class ItemIntegrityLifecycleListener implements Listener {
     }
 
     private HolderRef holderForInventory(Inventory inventory, Player viewer, Integer slot, String context) {
+        if (isOwnedEnderChest(inventory, viewer)) return new HolderRef.EnderChestHolder(viewer.getUniqueId(), viewer.getName(), slot);
         Location location = inventory.getLocation();
         if (location == null || location.getWorld() == null) {
             String owner = viewer != null ? viewer.getUniqueId().toString() : null;
@@ -642,6 +653,17 @@ public final class ItemIntegrityLifecycleListener implements Listener {
         HolderType type = holderType(material);
         return new HolderRef.ContainerHolder(type, location.getWorld().getName(),
                 location.getBlockX(), location.getBlockY(), location.getBlockZ(), slot);
+    }
+
+    private boolean isOwnedEnderChest(Inventory inventory, Player viewer) {
+        return viewer != null && inventory.equals(viewer.getEnderChest());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEnderOpen(org.bukkit.event.inventory.InventoryOpenEvent event) {
+        if (event.getPlayer() instanceof Player player && isOwnedEnderChest(event.getInventory(), player)) {
+            scheduleInventoryReconciliation(event.getInventory(), player, "ender_open");
+        }
     }
 
     private HolderType holderType(Material material) {
