@@ -1,11 +1,12 @@
 # Project workflow
 
-- Canonical private remote: https://github.com/joaopbelarmino/IllegalStack-ItemIntegrity-And-Logs.git
+- Canonical remote: https://github.com/joaopbelarmino/NomeDoPlugin.git
 - The repository name follows the owner's latest explicit instruction.
-- This Git repository is the primary source of truth for IllegalStack ZetraMC
+- This Git repository is the primary source of truth for IllegalStack ItemIntegrity And Logs
   Item Integrity. Work here, not in old ZIP extractions or copied releases.
-- The GitHub repository must remain PRIVATE. Verify the owner, destination and
-  private visibility before the first push and whenever the remote changes.
+- Publication was explicitly authorized by the owner after a secrets and license review.
+  Verify repository owner and destination before pushing. Never publish credentials.
+  Change visibility only with explicit authorization; do not claim a scan proves zero risk.
 - main is the stable branch. Never force-push, rewrite or delete main.
 - Before larger changes create a descriptive feature/* or fix/* branch from an
   up-to-date main. Preserve unrelated user edits. Commit clear, scoped changes
@@ -14,7 +15,7 @@
   keep the change on its branch and explicitly report that limitation.
 - For every requested change, inspect the diff, run focused tests plus the real
   Gradle build when code/build files change, commit with a clear message and
-  push to the verified private remote. Report the commit and push result.
+  push to the verified remote. Report the commit and push result.
 - If authentication, permissions or network prevents a push, report the blocker
   honestly. A local commit is not a GitHub backup. Never invent a remote URL.
 - Do not publish secrets, webhook URLs with tokens, passwords, .env files,
@@ -30,7 +31,7 @@
 - Target: Minecraft/Leaf 1.21.11, Java 21, Gradle Wrapper 8.10.2.
 - Windows build: .\gradlew.bat clean build --no-daemon
 - Linux build: bash ./gradlew clean build --no-daemon
-- Output: build/libs/Illegalstack-zetramc-3.0.jar. Do not commit build outputs.
+- Output: build/libs/IllegalStack-ItemIntegrity-And-Logs-3.0.jar. Do not commit build outputs.
 - UUID tracking and cleanup for stackable items were removed. Do not reintroduce
   them without an explicit new request. Equipment/shulker identity is separate.
 - Preserve RAM hot state, asynchronous SQLite writer, physical revalidation and
