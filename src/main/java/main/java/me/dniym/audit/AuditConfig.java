@@ -16,6 +16,10 @@ public final class AuditConfig {
     private final IllegalStack plugin;
     private final File file;
     private volatile YamlConfiguration yaml;
+    // Read on every hopper move; the yaml only changes in reload(), so resolve these once per load.
+    private record ContainerHot(boolean enabled, long debounceTicks, long maxDirtyTicks, int dirtyCapacity,
+                                int snapshotBudget, long snapshotBudgetNanos) {}
+    private volatile ContainerHot containerHot;
 
     public AuditConfig(IllegalStack plugin) throws IOException {
         this.plugin = plugin;
@@ -32,6 +36,12 @@ public final class AuditConfig {
         loaded.options().copyDefaults(true);
         loaded.save(file);
         yaml = loaded;
+        long debounce = Math.max(1, loaded.getLong("audit.containers.debounce-ticks", 60));
+        containerHot = new ContainerHot(loaded.getBoolean("audit.containers.enabled", true), debounce,
+                Math.max(debounce, loaded.getLong("audit.containers.max-dirty-ticks", 600)),
+                Math.max(64, loaded.getInt("audit.containers.dirty-capacity", 10000)),
+                Math.max(1, loaded.getInt("audit.containers.snapshot-budget-per-cycle", 8)),
+                (long) (Math.max(0.1, loaded.getDouble("audit.containers.snapshot-budget-ms", 2.0)) * 1_000_000));
     }
 
     private void defaults(YamlConfiguration y) {
@@ -79,12 +89,12 @@ public final class AuditConfig {
     public long reconcileTicks() { return Math.max(20, yaml.getLong("audit.playerdata.reconcile-interval-seconds", 300) * 20L); }
     public int playerBatch() { return Math.max(1, yaml.getInt("audit.playerdata.batch-size", 250)); }
     public long retryDelayMs() { return Math.max(50, yaml.getLong("audit.playerdata.retry-delay-ms", 250)); }
-    public boolean containersEnabled() { return yaml.getBoolean("audit.containers.enabled", true); }
-    public long debounceTicks() { return Math.max(1, yaml.getLong("audit.containers.debounce-ticks", 60)); }
-    public long maxDirtyTicks() { return Math.max(debounceTicks(), yaml.getLong("audit.containers.max-dirty-ticks", 600)); }
-    public long snapshotBudgetNanos(){return (long)(Math.max(0.1,yaml.getDouble("audit.containers.snapshot-budget-ms",2.0))*1_000_000);}
-    public int snapshotBudget() { return Math.max(1, yaml.getInt("audit.containers.snapshot-budget-per-cycle", 8)); }
-    public int dirtyCapacity() { return Math.max(64, yaml.getInt("audit.containers.dirty-capacity", 10000)); }
+    public boolean containersEnabled() { return containerHot.enabled(); }
+    public long debounceTicks() { return containerHot.debounceTicks(); }
+    public long maxDirtyTicks() { return containerHot.maxDirtyTicks(); }
+    public long snapshotBudgetNanos(){return containerHot.snapshotBudgetNanos();}
+    public int snapshotBudget() { return containerHot.snapshotBudget(); }
+    public int dirtyCapacity() { return containerHot.dirtyCapacity(); }
     public boolean indexChunkLoad() { return yaml.getBoolean("audit.containers.index-on-chunk-load", true); }
     public int destroyedRetentionDays() { return Math.max(1, yaml.getInt("audit.containers.destroyed-retention-days", 30)); }
     public int dbQueueCapacity() { return Math.max(100, yaml.getInt("audit.database.queue-capacity", 10000)); }

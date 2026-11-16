@@ -10,7 +10,6 @@ import org.bukkit.inventory.DoubleChestInventory;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -46,9 +45,9 @@ public final class ContainerResolver {
         Location right = location(inventory.getRightSide().getHolder(false));
         if (left == null || right == null || left.getWorld() == null || right.getWorld() == null) return Optional.empty();
         String a = blockKey(left), b = blockKey(right);
-        List<String> sorted = java.util.stream.Stream.of(a, b).sorted().toList();
-        Location canonical = a.compareTo(b) <= 0 ? left : right;
-        String key = "double:" + sorted.get(0) + "+" + sorted.get(1);
+        boolean leftFirst = a.compareTo(b) <= 0;
+        Location canonical = leftFirst ? left : right;
+        String key = "double:" + (leftFirst ? a + "+" + b : b + "+" + a);
         ContainerRef ref = new ContainerRef(ContainerRef.stableUuid(key), key, canonical.getWorld().getName(),
                 canonical.getBlockX(), canonical.getBlockY(), canonical.getBlockZ(), null, "DOUBLE_CHEST", inventory.getSize());
         return Optional.of(new Resolved(ref, inventory));
