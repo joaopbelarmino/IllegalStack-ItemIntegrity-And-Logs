@@ -107,6 +107,15 @@ public class CheckUtils {
     }
 
     public static boolean CheckEntireInventory(Inventory inv) {
+        Protections.beginScan(inv);
+        try {
+            return scanEntireInventory(inv);
+        } finally {
+            Protections.endScan();
+        }
+    }
+
+    private static boolean scanEntireInventory(Inventory inv) {
 
         for (ItemStack is : inv.getContents()) {
             if (is == null) {

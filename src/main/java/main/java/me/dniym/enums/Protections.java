@@ -1639,7 +1639,30 @@ public enum Protections {
     		
     }
     
+    // {inventory, world} of the CheckEntireInventory scan running on this thread: the world can't change mid-scan,
+    // and resolving it (getLocation) per item x per protection dominated the hopper scan cost.
+    private static final ThreadLocal<Object[]> SCAN_WORLD = new ThreadLocal<>();
+    private static final Object UNRESOLVED = new Object();
+
+    public static void beginScan(Inventory inv) {
+        SCAN_WORLD.set(new Object[]{inv, UNRESOLVED});
+    }
+
+    public static void endScan() {
+        SCAN_WORLD.remove();
+    }
+
     World getWorldFromObj(Object obj) {
+    	Object[] scan = SCAN_WORLD.get();
+    	if (scan != null && scan[0] == obj) {
+    		if (scan[1] == UNRESOLVED) // lazy: no getLocation() when every protection is off, as before
+    			scan[1] = resolveWorld(obj);
+    		return (World) scan[1];
+    	}
+    	return resolveWorld(obj);
+    }
+
+    private World resolveWorld(Object obj) {
     	
     	if(obj instanceof World)
     		return ((World)obj);
@@ -1683,7 +1706,7 @@ public enum Protections {
     			return null;
         		
         	} 
-            return ((Inventory) obj).getLocation().getWorld();
+            return loc.getWorld();
         }
         if (obj instanceof Location) 
             return ((Location) obj).getWorld();
